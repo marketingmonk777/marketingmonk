@@ -39,7 +39,17 @@
         { id: uid(), lead_id: leads[0].id, title: 'Call Ananya with floor plans', due_at: new Date(Date.now() + 3 * 3600e3).toISOString(), done: false, created_at: ago(1) },
         { id: uid(), lead_id: leads[2].id, title: 'Confirm Meera’s consultation slot', due_at: new Date(Date.now() - 2 * 3600e3).toISOString(), done: false, created_at: ago(5) },
       ];
-      return { stages, leads, notes, tasks };
+      const conv = { id: uid(), lead_id: leads[0].id, name: 'Ananya Rao', phone: '+919800000001', channel: 'whatsapp', status: 'human', score: 'hot', step: 9, answers: { interest: '2BHK apartment', budget: '₹60–75L', timeline: 'This month' }, unread: 1, updated_at: ago(0.5),
+        messages: [
+          { from: 'lead', body: 'Hi, I saw your ad for the new apartments near the ring road. What is the starting price?', at: ago(3) },
+          { from: 'ai', body: 'Namaste! 🙏 Thanks for reaching out. 2BHKs start at ₹58L. Do you have a budget in mind?', at: ago(3) },
+          { from: 'lead', body: 'Around 60 to 75 lakhs', at: ago(2.9) },
+          { from: 'ai', body: 'When are you hoping to move in?', at: ago(2.9) },
+          { from: 'lead', body: 'This month if possible', at: ago(2.8) },
+          { from: 'ai', body: 'Perfect, thank you! Priya from our team will call you shortly. 📞', at: ago(2.8) },
+          { from: 'lead', body: 'Can she share the floor plans first?', at: ago(0.5) },
+        ] };
+      return { stages, leads, notes, tasks, convs: [conv], agent: null };
     }
     reset() { this.db = this.seed(); this.save(); }
     async session() { return localStorage.getItem('mm_demo_on') ? { email: 'demo@marketingmonk' } : null; }
@@ -62,6 +72,15 @@
     async addTask(t) { this.db.tasks.push({ ...t, id: uid(), done: false, created_at: new Date().toISOString() }); this.save(); }
     async updateTask(id, patch) { Object.assign(this.db.tasks.find((t) => t.id === id), patch); this.save(); }
     async deleteTask(id) { this.db.tasks = this.db.tasks.filter((t) => t.id !== id); this.save(); }
+    async agentConfig() { return this.db.agent || { ...window.MonkEngine.DEFAULT_AGENT }; }
+    async saveAgentConfig(a) { this.db.agent = a; this.save(); }
+    async conversations() { return [...(this.db.convs || [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at)); }
+    async saveConversation(c) {
+      this.db.convs = this.db.convs || []; c = { ...c, updated_at: new Date().toISOString() };
+      if (!c.id) { c.id = uid(); this.db.convs.push(c); } else { const i = this.db.convs.findIndex((x) => x.id === c.id); if (i < 0) this.db.convs.push(c); else this.db.convs[i] = c; }
+      this.save(); return c;
+    }
+    async sendWhatsApp() { return { simulated: true }; }
   }
 
   /* ---------- Supabase store ---------- */
@@ -94,16 +113,25 @@
     async addTask(t) { this.chk(await this.sb.from('tasks').insert(t)); }
     async updateTask(id, patch) { this.chk(await this.sb.from('tasks').update(patch).eq('id', id)); }
     async deleteTask(id) { this.chk(await this.sb.from('tasks').delete().eq('id', id)); }
+    async agentConfig() { const r = this.chk(await this.sb.from('agent_config').select('config').maybeSingle()); return r?.config || { ...window.MonkEngine.DEFAULT_AGENT }; }
+    async saveAgentConfig(config) { this.chk(await this.sb.from('agent_config').upsert({ config })); }
+    async conversations() { return this.chk(await this.sb.from('conversations').select('*').order('updated_at', { ascending: false })); }
+    async saveConversation(c) {
+      const { id, owner, created_at, updated_at, ...row } = c;
+      if (id) return this.chk(await this.sb.from('conversations').update(row).eq('id', id).select().single());
+      return this.chk(await this.sb.from('conversations').insert(row).select().single());
+    }
+    async sendWhatsApp(conversation_id, body) { const { data, error } = await this.sb.functions.invoke('whatsapp-send', { body: { conversation_id, body } }); if (error) throw error; return data; }
   }
 
   /* ---------- State ---------- */
   const cfg = JSON.parse(localStorage.getItem('mm_supabase') || 'null');
   const cloud = cfg && window.supabase ? new SupaStore(cfg.url, cfg.key) : null;
   let store = null;
-  const state = { stages: [], leads: [], tasks: [], view: 'pipeline', editing: null };
+  const state = { stages: [], leads: [], tasks: [], convs: [], agent: null, activeConv: null, view: 'pipeline', editing: null };
 
   async function load() {
-    [state.stages, state.leads, state.tasks] = await Promise.all([store.stages(), store.leads(), store.tasks()]);
+    [state.stages, state.leads, state.tasks, state.convs, state.agent] = await Promise.all([store.stages(), store.leads(), store.tasks(), store.conversations(), store.agentConfig()]);
     render();
   }
 
@@ -119,11 +147,12 @@
     $$('.view').forEach((v) => v.classList.add('hidden'));
     $('#view-' + state.view).classList.remove('hidden');
     $$('.side nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === state.view));
-    $('#view-title').textContent = { pipeline: 'Pipeline', leads: 'Leads', tasks: 'Tasks', dashboard: 'Dashboard', settings: 'Settings' }[state.view];
+    $('#view-title').textContent = { pipeline: 'Pipeline', inbox: 'Inbox', leads: 'Leads', tasks: 'Tasks', dashboard: 'Dashboard', agent: 'Monk AI', settings: 'Settings' }[state.view];
     const showFilters = ['pipeline', 'leads'].includes(state.view);
     $('#search').classList.toggle('hidden', !showFilters);
     $('#filter-score').classList.toggle('hidden', !showFilters);
-    ({ pipeline: renderBoard, leads: renderTable, tasks: renderTasks, dashboard: renderDash, settings: renderSettings })[state.view]();
+    ({ pipeline: renderBoard, inbox: renderInbox, leads: renderTable, tasks: renderTasks, dashboard: renderDash, agent: renderAgent, settings: renderSettings })[state.view]();
+    const unread = state.convs.filter((c) => c.unread).length; const ic = $('#inbox-count'); ic.textContent = unread; ic.classList.toggle('hidden', !unread);
   }
 
   function card(l) {
@@ -277,6 +306,110 @@
     });
   }
 
+  /* ---------- Inbox ---------- */
+  const STATUS = { ai: '🧘 Monk AI', human: '👤 Needs you', done: '✓ Done' };
+  const timeAgo = (d) => { const m = Math.round((Date.now() - new Date(d)) / 6e4); return m < 1 ? 'now' : m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; };
+  function renderInbox() {
+    const q = $('#search').value.trim().toLowerCase();
+    const cs = state.convs.filter((c) => !q || (c.name + ' ' + c.phone).toLowerCase().includes(q));
+    $('#conv-list').innerHTML = cs.length ? cs.map((c) => {
+      const last = (c.messages || []).at(-1);
+      return `<button class="conv ${c.id === state.activeConv ? 'active' : ''} ${c.unread ? 'unread' : ''}" data-id="${c.id}">
+        <div class="conv-top"><b>${esc(c.name || c.phone)}</b><span class="small muted">${last ? timeAgo(last.at) : ''}</span></div>
+        <p class="small muted">${esc(last ? (last.from === 'lead' ? '' : last.from === 'ai' ? 'AI: ' : 'You: ') + last.body : '')}</p>
+        <div class="conv-tags"><span class="st ${c.status}">${STATUS[c.status] || ''}</span>${c.score ? `<span class="score ${c.score}">${SCORE[c.score]}</span>` : ''}${c.channel === 'simulator' ? '<span class="st">Test</span>' : ''}</div>
+      </button>`;
+    }).join('') : '<p class="empty">No conversations yet. Try the Monk AI test chat.</p>';
+    renderThread();
+  }
+  function renderThread() {
+    const c = state.convs.find((x) => x.id === state.activeConv);
+    if (!c) { $('#thread').innerHTML = '<p class="empty">Pick a conversation. New WhatsApp chats land here, and Monk AI answers them first.</p>'; return; }
+    const who = { lead: '', ai: 'Monk AI', rep: 'You' };
+    $('#thread').innerHTML = `<div class="thread-head"><div><b>${esc(c.name || c.phone)}</b><span class="small muted">${esc(c.phone || '')} · ${STATUS[c.status] || ''}</span></div>
+      <div class="drawer-actions">${c.lead_id ? '<button class="btn btn-ghost btn-sm" id="t-lead">Open lead</button>' : ''}<button class="btn btn-ghost btn-sm" id="t-toggle">${c.status === 'ai' ? 'Take over' : 'Let Monk AI reply'}</button></div></div>
+      ${Object.keys(c.answers || {}).length ? `<div class="answers">${Object.entries(c.answers).map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('')}</div>` : ''}
+      <div class="bubbles" id="bubbles">${(c.messages || []).map((m) => `<div class="bub ${m.from}">${who[m.from] ? `<i>${who[m.from]}</i>` : ''}${esc(m.body)}<span>${fmtDT(m.at)}</span></div>`).join('')}</div>
+      <form id="reply-form" class="sim-form"><input id="reply-input" placeholder="Reply on WhatsApp…" autocomplete="off" required><button class="btn btn-sm">Send</button></form>`;
+    const b = $('#bubbles'); b.scrollTop = b.scrollHeight;
+  }
+
+  /* ---------- Monk AI setup + simulator ---------- */
+  function qRow(q = { key: '', question: '' }) { return `<div class="q-row"><input class="q-key" placeholder="field (budget)" value="${esc(q.key)}"><input class="q-text" placeholder="Question to ask" value="${esc(q.question)}"><button type="button" class="x">×</button></div>`; }
+  function renderAgent() {
+    const a = state.agent || {}; const f = $('#agent-form');
+    ['business_name', 'rep_name', 'about', 'greeting', 'hot_words', 'cold_words', 'handoff_hot', 'handoff_other'].forEach((k) => { f.elements[k].value = a[k] || ''; });
+    $('#q-list').innerHTML = (a.questions || []).map(qRow).join('');
+    if (!sim.started) simReset();
+  }
+  const sim = { conv: null, started: false, busy: false };
+  function simBubble(from, body) { const el = document.createElement('div'); el.className = 'bub ' + from; el.innerHTML = (from === 'ai' ? '<i>Monk AI</i>' : '') + esc(body); $('#sim-body').append(el); $('#sim-body').scrollTop = 1e6; }
+  function simReset() { sim.started = true; sim.conv = { step: -1, answers: {}, status: 'ai', messages: [] }; $('#sim-body').innerHTML = '<p class="empty small">Say hi the way a customer would, e.g. "Hi, I saw your ad".</p>'; $('#sim-note').textContent = 'Finished chats create a scored lead in your pipeline and inbox.'; $('#sim-input').disabled = false; }
+  async function simSend(text) {
+    if (sim.busy) return; sim.busy = true;
+    if (sim.conv.step === -1) $('#sim-body').innerHTML = '';
+    const now = () => new Date().toISOString();
+    simBubble('lead', text); sim.conv.messages.push({ from: 'lead', body: text, at: now() });
+    const r = window.MonkEngine.nextTurn(sim.conv, text, state.agent);
+    sim.conv = { ...r.conv, messages: sim.conv.messages };
+    for (const reply of r.replies) {
+      const typing = document.createElement('div'); typing.className = 'bub ai typing'; typing.innerHTML = '<i>Monk AI</i><b>•••</b>'; $('#sim-body').append(typing); $('#sim-body').scrollTop = 1e6;
+      await new Promise((ok) => setTimeout(ok, 650)); typing.remove();
+      simBubble('ai', reply); sim.conv.messages.push({ from: 'ai', body: reply, at: now() });
+    }
+    if (r.done) {
+      const ans = sim.conv.answers;
+      const qualified = state.stages.find((s) => /qualif/i.test(s.name)) || state.stages[0];
+      const stage = r.score === 'hot' ? qualified : state.stages[0];
+      const name = 'Test lead ' + new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+      try {
+        const lead = await store.saveLead({ name, phone: '', email: '', source: 'WhatsApp', score: r.score, stage_id: stage?.id || null, interest: ans.interest || '', budget: ans.budget || '', timeline: ans.timeline || '', assigned_to: r.score === 'hot' ? (state.agent?.rep_name || '') : '', value: 0, tags: ['monk-ai'] });
+        await store.saveConversation({ lead_id: lead.id, name, phone: '', channel: 'simulator', status: sim.conv.status, score: r.score, step: sim.conv.step, answers: ans, unread: r.score === 'hot' ? 1 : 0, messages: sim.conv.messages });
+        if (r.score === 'hot') await store.addTask({ lead_id: lead.id, title: `Call ${name} (hot lead from Monk AI)`, due_at: new Date(Date.now() + 15 * 6e4).toISOString() });
+        $('#sim-note').innerHTML = `Lead created: <span class="score ${r.score}">${SCORE[r.score]}</span> in ${esc(stage?.name || 'pipeline')}. <a href="#" id="sim-restart">Test again</a>`;
+        $('#sim-input').disabled = true;
+        await load();
+      } catch (err) { toast(err.message); }
+    }
+    sim.busy = false;
+  }
+
+  function bindAI() {
+    $('#conv-list').addEventListener('click', async (e) => {
+      const b = e.target.closest('.conv'); if (!b) return; state.activeConv = b.dataset.id;
+      const c = state.convs.find((x) => x.id === b.dataset.id);
+      if (c?.unread) { c.unread = 0; render(); try { await store.saveConversation({ ...c }); } catch {} } else renderInbox();
+    });
+    $('#thread').addEventListener('click', async (e) => {
+      const c = state.convs.find((x) => x.id === state.activeConv); if (!c) return;
+      if (e.target.id === 't-lead') openLead(c.lead_id);
+      if (e.target.id === 't-toggle') { c.status = c.status === 'ai' ? 'human' : 'ai'; await store.saveConversation({ ...c }); toast(c.status === 'ai' ? 'Monk AI will reply' : 'You have taken over'); load(); }
+    });
+    $('#thread').addEventListener('submit', async (e) => {
+      if (e.target.id !== 'reply-form') return; e.preventDefault();
+      const c = state.convs.find((x) => x.id === state.activeConv); const body = $('#reply-input').value.trim(); if (!c || !body) return;
+      c.messages = [...(c.messages || []), { from: 'rep', body, at: new Date().toISOString() }];
+      if (c.status === 'ai') c.status = 'human';
+      try {
+        if (c.channel === 'whatsapp' && store.mode === 'cloud') await store.sendWhatsApp(c.id, body);
+        else await store.saveConversation({ ...c });
+        if (c.lead_id) await store.addNote({ lead_id: c.lead_id, kind: 'whatsapp', body: 'Replied: ' + body });
+      } catch (err) { toast('Not sent: ' + err.message); }
+      load();
+    });
+    $('#add-q').addEventListener('click', () => $('#q-list').insertAdjacentHTML('beforeend', qRow()));
+    $('#q-list').addEventListener('click', (e) => { if (e.target.matches('.x')) e.target.closest('.q-row').remove(); });
+    $('#agent-form').addEventListener('submit', async (e) => {
+      e.preventDefault(); const f = e.target; const a = {};
+      ['business_name', 'rep_name', 'about', 'greeting', 'hot_words', 'cold_words', 'handoff_hot', 'handoff_other'].forEach((k) => { a[k] = f.elements[k].value.trim(); });
+      a.questions = $$('.q-row').map((r) => ({ key: r.querySelector('.q-key').value.trim().toLowerCase().replace(/\s+/g, '_') || 'answer', question: r.querySelector('.q-text').value.trim() })).filter((q) => q.question);
+      try { await store.saveAgentConfig(a); state.agent = a; toast('Monk AI saved'); simReset(); } catch (err) { toast(err.message); }
+    });
+    $('#sim-form').addEventListener('submit', (e) => { e.preventDefault(); const v = $('#sim-input').value.trim(); if (!v || $('#sim-input').disabled) return; $('#sim-input').value = ''; simSend(v); });
+    $('#sim-reset').addEventListener('click', simReset);
+    $('#sim-note').addEventListener('click', (e) => { if (e.target.id === 'sim-restart') { e.preventDefault(); simReset(); } });
+  }
+
   /* ---------- Auth ---------- */
   function bindAuth() {
     let signup = false;
@@ -300,15 +433,15 @@
     $('#mode-badge').textContent = store.mode === 'demo' ? 'Demo mode' : 'Cloud sync';
     $('#mode-badge').className = 'badge ' + store.mode;
     $('#user-email').textContent = sess?.email || '';
-    const h = location.hash.slice(1); if (['pipeline', 'leads', 'tasks', 'dashboard', 'settings'].includes(h)) state.view = h;
+    const h = location.hash.slice(1); if (['pipeline', 'inbox', 'leads', 'tasks', 'dashboard', 'agent', 'settings'].includes(h)) state.view = h;
     try { await load(); } catch (err) { toast(err.message); }
   }
 
   async function boot() {
-    bind(); bindAuth();
+    bind(); bindAuth(); bindAI();
     if (cloud && (await cloud.session())) return start(cloud);
     if (!cloud && localStorage.getItem('mm_demo_on')) return start(new LocalStore());
     $('#auth').classList.remove('hidden');
   }
-  boot();
+  document.addEventListener('DOMContentLoaded', boot);
 })();

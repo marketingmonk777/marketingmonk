@@ -35,9 +35,11 @@
     <a class="brand" href="../"><img src="../assets/logo-mark.svg" width="34" alt=""><span>Marketing<b>Monk</b></span></a>
     <nav>
       <a href="#pipeline" data-view="pipeline" class="active">🗂️ Pipeline</a>
+      <a href="#inbox" data-view="inbox">💬 Inbox <span id="inbox-count" class="count hidden"></span></a>
       <a href="#leads" data-view="leads">👥 Leads</a>
       <a href="#tasks" data-view="tasks">✅ Tasks</a>
       <a href="#dashboard" data-view="dashboard">📈 Dashboard</a>
+      <a href="#agent" data-view="agent">🧘 Monk AI</a>
       <a href="#settings" data-view="settings">⚙️ Settings</a>
     </nav>
     <div class="side-foot">
@@ -58,6 +60,41 @@
     </header>
 
     <section id="view-pipeline" class="view"><div id="board" class="board"></div></section>
+    <section id="view-inbox" class="view hidden">
+      <div class="inbox">
+        <div class="conv-list" id="conv-list"></div>
+        <div class="thread" id="thread"><p class="empty">Pick a conversation. New WhatsApp chats land here, and Monk AI answers them first.</p></div>
+      </div>
+    </section>
+    <section id="view-agent" class="view hidden">
+      <div class="agent-grid">
+        <form id="agent-form" class="panel">
+          <h3>Monk AI setup</h3>
+          <p class="muted small">Teach the agent about your business and what makes a lead worth calling.</p>
+          <div class="grid2">
+            <label>Business name<input name="business_name" required></label>
+            <label>Rep to hand off to<input name="rep_name" placeholder="Priya"></label>
+          </div>
+          <label class="full">About your business<textarea name="about" rows="2"></textarea></label>
+          <label class="full">Greeting<textarea name="greeting" rows="2"></textarea></label>
+          <h4>Qualifying questions</h4>
+          <div id="q-list" class="q-list"></div>
+          <button type="button" class="link" id="add-q">+ Add question</button>
+          <h4>Scoring</h4>
+          <label class="full">🔥 Hot signals (comma separated)<input name="hot_words"></label>
+          <label class="full">❄️ Cold signals<input name="cold_words"></label>
+          <label class="full">Reply when the lead is hot<input name="handoff_hot"></label>
+          <label class="full">Reply for warm and cold leads<input name="handoff_other"></label>
+          <div class="drawer-actions"><button class="btn btn-sm">Save Monk AI</button></div>
+        </form>
+        <div class="panel sim">
+          <div class="sim-head"><img src="../assets/logo-mark.svg" width="32" alt=""><div><b>Test chat</b><span class="small">Talk to Monk AI as a lead</span></div><button class="link" id="sim-reset">Restart</button></div>
+          <div class="sim-body" id="sim-body"></div>
+          <form id="sim-form" class="sim-form"><input id="sim-input" placeholder="Type as the customer…" autocomplete="off"><button class="btn btn-sm">Send</button></form>
+          <p class="small muted" id="sim-note">Finished chats create a scored lead in your pipeline and inbox.</p>
+        </div>
+      </div>
+    </section>
     <section id="view-leads" class="view hidden"><div class="table-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Score</th><th>Stage</th><th>Source</th><th>Interest</th><th>Owner</th><th>Added</th></tr></thead><tbody id="leads-body"></tbody></table></div></section>
     <section id="view-tasks" class="view hidden">
       <form id="task-form" class="row-form"><input id="task-title" placeholder="Follow up with…" required><input id="task-due" type="datetime-local"><button class="btn btn-sm">Add task</button></form>
@@ -130,6 +167,7 @@
 
 <div id="toast" class="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="module" src="../supabase/functions/_shared/monk-engine.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
