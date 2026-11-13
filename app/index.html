@@ -186,7 +186,7 @@
       </div>
       <div class="panel">
         <h3>Supabase connection</h3>
-        <p class="muted small">Paste your project URL and anon public key (Supabase → Project Settings → API). They're stored only in this browser.</p>
+        <p class="muted small">Paste your Project URL and publishable key (Supabase → Connect, or Project Settings → API Keys). They're stored only in this browser.</p>
         <button class="btn btn-ghost btn-sm" id="settings-connect">Connect Supabase</button>
       </div>
       <div class="panel">
@@ -238,7 +238,7 @@
   <form method="dialog" id="connect-form">
     <h3>Connect Supabase</h3>
     <label>Project URL<input id="sb-url" placeholder="https://xxxx.supabase.co" required></label>
-    <label>Anon public key<input id="sb-key" placeholder="eyJhbGci…" required></label>
+    <label>Publishable key<input id="sb-key" placeholder="sb_publishable_…" required></label>
     <div class="drawer-actions"><button class="btn btn-sm" value="save">Save &amp; reload</button><button class="btn btn-ghost btn-sm" value="cancel" formnovalidate>Cancel</button><button class="btn btn-danger btn-sm" value="clear" formnovalidate>Disconnect</button></div>
   </form>
 </dialog>

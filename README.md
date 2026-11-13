@@ -28,7 +28,7 @@ Built clean-room: features inspired by the category, with original design, code 
 1. Create a free project at supabase.com.
 2. SQL Editor → New query → paste `supabase/schema.sql` → Run. Every table has row-level security, so each user only sees their own data.
 3. Authentication → URL Configuration → add your site URL (e.g. `https://marketingmonk777.github.io/marketingmonk/app/`).
-4. Open `/app` → "Connect your Supabase project" → paste the Project URL and the anon public key (Project Settings → API). They're kept in that browser only.
+4. Open `/app` → "Connect your Supabase project" → paste the Project URL and the publishable key, `sb_publishable_…` (the Connect button, or Project Settings → API Keys; the legacy anon key also works). They're kept in that browser only.
 
 ## Go live on WhatsApp (free tiers)
 1. Run the updated `supabase/schema.sql` again (it adds `agent_config` and `conversations`).
