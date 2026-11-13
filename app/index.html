@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MarketingMonk App</title>
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<!-- Auth screen -->
+<section id="auth" class="auth hidden">
+  <div class="auth-card">
+    <img src="../assets/logo-mark.svg" width="72" alt="MarketingMonk">
+    <h1>Welcome to Marketing<b>Monk</b></h1>
+    <p class="muted" id="auth-sub">Sign in to your workspace.</p>
+    <form id="auth-form">
+      <input id="auth-email" type="email" placeholder="you@business.com" required autocomplete="email">
+      <input id="auth-pass" type="password" placeholder="Password (min 6 characters)" required minlength="6" autocomplete="current-password">
+      <button class="btn" type="submit" id="auth-submit">Sign in</button>
+    </form>
+    <p class="small"><a href="#" id="auth-toggle">New here? Create an account</a></p>
+    <p class="msg-line" id="auth-msg"></p>
+    <div class="divider"><span>or</span></div>
+    <button class="btn btn-ghost" id="demo-btn">Try the demo (saved in this browser)</button>
+    <p class="small"><a href="#" id="open-connect">Connect your Supabase project</a></p>
+  </div>
+</section>
+
+<!-- App shell -->
+<div id="shell" class="shell hidden">
+  <aside class="side">
+    <a class="brand" href="../"><img src="../assets/logo-mark.svg" width="34" alt=""><span>Marketing<b>Monk</b></span></a>
+    <nav>
+      <a href="#pipeline" data-view="pipeline" class="active">🗂️ Pipeline</a>
+      <a href="#leads" data-view="leads">👥 Leads</a>
+      <a href="#tasks" data-view="tasks">✅ Tasks</a>
+      <a href="#dashboard" data-view="dashboard">📈 Dashboard</a>
+      <a href="#settings" data-view="settings">⚙️ Settings</a>
+    </nav>
+    <div class="side-foot">
+      <span id="mode-badge" class="badge"></span>
+      <span id="user-email" class="small muted"></span>
+      <button class="link" id="signout">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="top">
+      <h2 id="view-title">Pipeline</h2>
+      <div class="top-actions">
+        <input id="search" type="search" placeholder="Search leads…">
+        <select id="filter-score"><option value="">All scores</option><option value="hot">🔥 Hot</option><option value="warm">🌤️ Warm</option><option value="cold">❄️ Cold</option></select>
+        <button class="btn btn-sm" id="new-lead">+ New lead</button>
+      </div>
+    </header>
+
+    <section id="view-pipeline" class="view"><div id="board" class="board"></div></section>
+    <section id="view-leads" class="view hidden"><div class="table-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Score</th><th>Stage</th><th>Source</th><th>Interest</th><th>Owner</th><th>Added</th></tr></thead><tbody id="leads-body"></tbody></table></div></section>
+    <section id="view-tasks" class="view hidden">
+      <form id="task-form" class="row-form"><input id="task-title" placeholder="Follow up with…" required><input id="task-due" type="datetime-local"><button class="btn btn-sm">Add task</button></form>
+      <ul id="task-list" class="task-list"></ul>
+    </section>
+    <section id="view-dashboard" class="view hidden"><div id="stats" class="stats"></div><div class="panel"><h3>Leads by stage</h3><div id="bars"></div></div><div class="panel"><h3>Leads by source</h3><div id="sources"></div></div></section>
+    <section id="view-settings" class="view hidden">
+      <div class="panel">
+        <h3>Pipeline stages</h3>
+        <p class="muted small">Rename, reorder or add stages to match how you sell.</p>
+        <ul id="stage-list" class="stage-list"></ul>
+        <form id="stage-form" class="row-form"><input id="stage-name" placeholder="New stage name" required><button class="btn btn-sm">Add stage</button></form>
+      </div>
+      <div class="panel">
+        <h3>Supabase connection</h3>
+        <p class="muted small">Paste your project URL and anon public key (Supabase → Project Settings → API). They're stored only in this browser.</p>
+        <button class="btn btn-ghost btn-sm" id="settings-connect">Connect Supabase</button>
+      </div>
+      <div class="panel">
+        <h3>Demo data</h3>
+        <button class="btn btn-ghost btn-sm" id="reset-demo">Reset demo data</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Lead drawer -->
+<aside id="drawer" class="drawer hidden" aria-label="Lead details">
+  <form id="lead-form">
+    <div class="drawer-head"><h3 id="drawer-title">New lead</h3><button type="button" class="x" id="drawer-close">×</button></div>
+    <div class="grid2">
+      <label>Name<input name="name" required></label>
+      <label>Phone<input name="phone" placeholder="+91…"></label>
+      <label>Email<input name="email" type="email"></label>
+      <label>Source<select name="source"><option>Meta ads</option><option>Google ads</option><option>Website</option><option>WhatsApp</option><option>Referral</option><option>Walk-in</option></select></label>
+      <label>Score<select name="score"><option value="hot">🔥 Hot</option><option value="warm" selected>🌤️ Warm</option><option value="cold">❄️ Cold</option></select></label>
+      <label>Stage<select name="stage_id" id="stage-select"></select></label>
+      <label>Interest<input name="interest" placeholder="2BHK, trial class…"></label>
+      <label>Budget<input name="budget" placeholder="₹50k–1L"></label>
+      <label>Timeline<input name="timeline" placeholder="This month"></label>
+      <label>Assigned to<input name="assigned_to" placeholder="Priya"></label>
+      <label>Deal value (₹)<input name="value" type="number" min="0" step="1"></label>
+      <label>Tags<input name="tags" placeholder="comma, separated"></label>
+    </div>
+    <div class="drawer-actions">
+      <button class="btn btn-sm" type="submit">Save lead</button>
+      <a class="btn btn-ghost btn-sm hidden" id="wa-link" target="_blank" rel="noopener">WhatsApp</a>
+      <button class="btn btn-danger btn-sm hidden" type="button" id="delete-lead">Delete</button>
+    </div>
+  </form>
+  <div id="lead-extra" class="hidden">
+    <h4>Activity</h4>
+    <form id="note-form" class="row-form"><select id="note-kind"><option value="note">📝 Note</option><option value="call">📞 Call</option><option value="whatsapp">💬 WhatsApp</option><option value="email">✉️ Email</option></select><input id="note-body" placeholder="What happened?" required><button class="btn btn-sm">Log</button></form>
+    <ul id="note-list" class="note-list"></ul>
+    <h4>Follow-up reminder</h4>
+    <form id="lead-task-form" class="row-form"><input id="lead-task-title" placeholder="Call back about pricing" required><input id="lead-task-due" type="datetime-local"><button class="btn btn-sm">Add</button></form>
+  </div>
+</aside>
+<div id="scrim" class="scrim hidden"></div>
+
+<!-- Connect modal -->
+<dialog id="connect">
+  <form method="dialog" id="connect-form">
+    <h3>Connect Supabase</h3>
+    <label>Project URL<input id="sb-url" placeholder="https://xxxx.supabase.co" required></label>
+    <label>Anon public key<input id="sb-key" placeholder="eyJhbGci…" required></label>
+    <div class="drawer-actions"><button class="btn btn-sm" value="save">Save &amp; reload</button><button class="btn btn-ghost btn-sm" value="cancel" formnovalidate>Cancel</button><button class="btn btn-danger btn-sm" value="clear" formnovalidate>Disconnect</button></div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="app.js"></script>
+</body>
+</html>
