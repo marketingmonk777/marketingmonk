@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="MarketingMonk logo">
+  <title>MarketingMonk</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2A2470"/><stop offset="1" stop-color="#16123A"/>
+    </linearGradient>
+    <linearGradient id="robe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F7A440"/><stop offset="1" stop-color="#E5761C"/>
+    </linearGradient>
+    <style>
+      .float{animation:float 4s ease-in-out infinite;transform-origin:60px 70px}
+      .halo{animation:halo 4s ease-in-out infinite;transform-origin:60px 40px}
+      .ping{animation:ping 4s ease-out infinite;transform-origin:60px 40px}
+      .dot{animation:blink 1.6s ease-in-out infinite}
+      .d2{animation-delay:.2s}.d3{animation-delay:.4s}
+      @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+      @keyframes halo{0%,100%{opacity:.85;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
+      @keyframes ping{0%{opacity:.6;transform:scale(1)}70%,100%{opacity:0;transform:scale(1.45)}}
+      @keyframes blink{0%,100%{opacity:.35}50%{opacity:1}}
+      @media (prefers-reduced-motion:reduce){.float,.halo,.ping,.dot{animation:none}}
+    </style>
+  </defs>
+  <rect width="120" height="120" rx="28" fill="url(#bg)"/>
+  <circle class="ping" cx="60" cy="40" r="21" fill="none" stroke="#2DD4BF" stroke-width="2"/>
+  <g class="float">
+    <circle class="halo" cx="60" cy="40" r="21" fill="none" stroke="#2DD4BF" stroke-width="3"/>
+    <!-- chat tail on halo: halo doubles as a message bubble -->
+    <path d="M77 52 L86 60 L73 57 Z" fill="#2DD4BF"/>
+    <ellipse cx="60" cy="93" rx="33" ry="9" fill="#C9621A"/>
+    <path d="M37 70 Q38 55 60 54 Q82 55 83 70 L88 90 Q60 99 32 90 Z" fill="url(#robe)"/>
+    <path d="M49 56 L74 91 L66 93 L43 61 Z" fill="#C9621A" opacity=".85"/>
+    <circle cx="60" cy="43" r="12" fill="#FFE4C4"/>
+    <path d="M54.5 44.5 q2 2 4 0 M61.5 44.5 q2 2 4 0" stroke="#3B2A20" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+    <circle cx="60" cy="80" r="5" fill="#FFE4C4"/>
+    <circle class="dot" cx="53" cy="30" r="1.6" fill="#FFF7ED"/>
+    <circle class="dot d2" cx="60" cy="30" r="1.6" fill="#FFF7ED"/>
+    <circle class="dot d3" cx="67" cy="30" r="1.6" fill="#FFF7ED"/>
+  </g>
+</svg>
