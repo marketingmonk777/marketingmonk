@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Get in touch</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{--indigo:#1E1B4B;--saffron:#F28C28;--saffron-d:#E5761C;--teal:#14B8A6;--cream:#FFF7ED;--ink:#0F172A;--mist:#E2E8F0;--muted:#64748B}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,sans-serif;color:var(--ink);background:transparent;padding:12px;display:grid;place-items:start center;min-height:100vh}
+.card{width:100%;max-width:460px;background:#fff;border-radius:18px;box-shadow:0 10px 30px rgba(15,23,42,.12);overflow:hidden}
+.top{background:var(--indigo);color:#fff;padding:20px 22px;display:flex;gap:12px;align-items:center}
+.top h1{font-family:'Plus Jakarta Sans',sans-serif;font-size:1.2rem}.top p{color:#CBD5E1;font-size:.85rem}
+form,.done{padding:20px 22px;display:grid;gap:10px}
+input,textarea{font:inherit;padding:11px 12px;border:1px solid var(--mist);border-radius:10px;width:100%}
+input:focus,textarea:focus{outline:2px solid #2DD4BF;border-color:transparent}
+.consent{display:flex;gap:8px;align-items:flex-start;font-size:.8rem;color:var(--muted)}.consent input{width:auto;margin-top:3px}
+.btn{background:var(--saffron);color:#fff;border:0;border-radius:999px;padding:13px;font:inherit;font-weight:700;cursor:pointer;text-align:center;text-decoration:none}
+.btn:hover{background:var(--saffron-d)}.btn:disabled{opacity:.6}
+.btn-ghost{background:#fff;color:var(--indigo);box-shadow:inset 0 0 0 1.5px var(--indigo)}
+.done{text-align:center;justify-items:center;padding:34px 22px}
+.tick{width:64px;height:64px;border-radius:50%;background:#CCFBF1;display:grid;place-items:center;font-size:1.8rem}
+h2{font-family:'Plus Jakarta Sans',sans-serif;color:var(--indigo)}
+.err{color:#DC2626;font-size:.85rem}.hidden{display:none!important}.hp{position:absolute;left:-9999px}
+.by{font-size:.72rem;color:var(--muted);text-align:center;padding:0 0 14px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="top"><img src="../assets/logo-mark.svg" width="40" height="40" alt=""><div><h1 id="biz">Get in touch</h1><p>Leave your details and we'll WhatsApp you shortly.</p></div></div>
+  <form id="f">
+    <input name="name" placeholder="Your name" required autocomplete="name" maxlength="120">
+    <input name="phone" placeholder="WhatsApp number, e.g. +91 98…" required autocomplete="tel" pattern="[+0-9 ()-]{8,}">
+    <input name="email" type="email" placeholder="Email (optional)" autocomplete="email">
+    <textarea name="interest" rows="3" placeholder="What are you looking for?" maxlength="500"></textarea>
+    <input name="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+    <label class="consent"><input type="checkbox" name="ok" required> I agree to be contacted on WhatsApp about my enquiry.</label>
+    <button class="btn" id="go">Send</button>
+    <p class="err hidden" id="err"></p>
+  </form>
+  <div class="done hidden" id="done"><div class="tick">✓</div><h2>Thank you!</h2><p style="color:var(--muted)">We've got your details and will message you on WhatsApp shortly.</p><a class="btn btn-ghost hidden" id="book" target="_top">Or pick a call time now</a></div>
+  <p class="by">Powered by MarketingMonk 🧘</p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const qs = new URLSearchParams(location.search), DEMO = qs.has('demo');
+  const id = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
+  let biz = '';
+  if (DEMO) { const db = JSON.parse(localStorage.getItem('mm_demo_v1') || '{}'); biz = db.agent?.business_name || 'MarketingMonk'; }
+  if (biz) $('#biz').textContent = 'Talk to ' + biz;
+
+  async function submit(l) {
+    if (DEMO) {
+      const db = JSON.parse(localStorage.getItem('mm_demo_v1') || '{}'); const now = new Date().toISOString();
+      const d = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+      const ex = (db.leads || []).find((x) => d(x.phone) && d(x.phone) === d(l.phone));
+      if (ex) { ex.interest = ex.interest || l.interest; ex.updated_at = now; (db.notes ||= []).push({ id: id(), lead_id: ex.id, kind: 'note', body: 'Filled the website form again: ' + (l.interest || '(no message)'), created_at: now }); }
+      else (db.leads ||= []).push({ id: id(), name: l.name, phone: l.phone, email: l.email, source: 'Website', score: 'warm', stage_id: db.stages?.[0]?.id || null, interest: l.interest, budget: '', timeline: '', assigned_to: '', value: 0, tags: ['web-form'], created_at: now, updated_at: now });
+      localStorage.setItem('mm_demo_v1', JSON.stringify(db)); return;
+    }
+    const c = JSON.parse(atob(location.hash.slice(1) || 'e30='));
+    if (!c.u || !window.supabase) throw new Error('This form is not connected yet.');
+    const sb = window.supabase.createClient(c.u, c.k);
+    const { error } = await sb.rpc('mm_capture_lead', { p_slug: qs.get('b'), p_name: l.name, p_phone: l.phone, p_email: l.email || null, p_interest: l.interest || null, p_page: document.referrer || null });
+    if (error) throw new Error('Could not send right now. Please try again.');
+  }
+
+  $('#f').addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = e.target; if (f.elements.website.value) return; // bot trap
+    $('#go').disabled = true; $('#err').classList.add('hidden');
+    try {
+      await submit({ name: f.elements.name.value.trim(), phone: f.elements.phone.value.trim(), email: f.elements.email.value.trim(), interest: f.elements.interest.value.trim() });
+      f.classList.add('hidden'); $('#done').classList.remove('hidden');
+      const book = new URL('../book/', location.href); book.search = location.search; book.hash = location.hash;
+      $('#book').href = book.href; $('#book').classList.remove('hidden');
+    } catch (err) { $('#err').textContent = err.message; $('#err').classList.remove('hidden'); }
+    $('#go').disabled = false;
+  });
+})();
+</script>
+</body>
+</html>

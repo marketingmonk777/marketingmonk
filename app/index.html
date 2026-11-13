@@ -40,8 +40,9 @@
       <a href="#followups" data-view="followups">🔁 Follow-ups <span id="due-count" class="count hidden"></span></a>
       <a href="#bookings" data-view="bookings">📅 Bookings</a>
       <a href="#tasks" data-view="tasks">✅ Tasks</a>
-      <a href="#dashboard" data-view="dashboard">📈 Dashboard</a>
+      <a href="#dashboard" data-view="dashboard">📊 Insights</a>
       <a href="#agent" data-view="agent">🧘 Monk AI</a>
+      <a href="#integrations" data-view="integrations">🔌 Integrations</a>
       <a href="#settings" data-view="settings">⚙️ Settings</a>
     </nav>
     <div class="side-foot">
@@ -144,7 +145,37 @@
       <form id="task-form" class="row-form"><input id="task-title" placeholder="Follow up with…" required><input id="task-due" type="datetime-local"><button class="btn btn-sm">Add task</button></form>
       <ul id="task-list" class="task-list"></ul>
     </section>
-    <section id="view-dashboard" class="view hidden"><div id="stats" class="stats"></div><div class="panel"><h3>Leads by stage</h3><div id="bars"></div></div><div class="panel"><h3>Leads by source</h3><div id="sources"></div></div></section>
+    <section id="view-dashboard" class="view hidden">
+      <div class="ins-bar"><div class="seg" id="range"><button data-d="7">7 days</button><button data-d="30" class="on">30 days</button><button data-d="90">90 days</button><button data-d="0">All time</button></div><button class="btn btn-ghost btn-sm" id="export-csv">⬇ Export leads CSV</button></div>
+      <div id="stats" class="stats"></div>
+      <div class="ins-grid">
+        <div class="panel wide"><h3>New leads per day</h3><div id="trend" class="trend"></div></div>
+        <div class="panel"><h3>Funnel</h3><p class="muted small">How many leads reached each stage or beyond.</p><div id="bars"></div></div>
+        <div class="panel"><h3>Lead sources</h3><table class="mini" id="sources"></table></div>
+        <div class="panel"><h3>🧘 Monk AI</h3><div id="ai-stats" class="kv"></div></div>
+        <div class="panel"><h3>🔁 Follow-ups &amp; 📅 bookings</h3><div id="fu-stats" class="kv"></div></div>
+        <div class="panel wide"><h3>Team</h3><table class="mini" id="team"></table></div>
+      </div>
+    </section>
+    <section id="view-integrations" class="view hidden">
+      <div class="int-grid">
+        <div class="panel int"><div class="int-h"><span class="ico">🌐</span><div><h3>Website lead form</h3><p class="muted small">Paste on any website. Leads land in New, scored and ready for follow-up.</p></div></div>
+          <textarea id="embed-code" rows="3" readonly></textarea>
+          <div class="drawer-actions"><button class="btn btn-sm" data-copy="embed-code">Copy code</button><a class="btn btn-ghost btn-sm" id="open-capture" target="_blank" rel="noopener">Preview form</a></div></div>
+        <div class="panel int"><div class="int-h"><span class="ico">💬</span><div><h3>WhatsApp click-to-chat</h3><p class="muted small">For ads, Instagram bio, posters and your shop counter.</p></div></div>
+          <div class="grid2"><label>Business WhatsApp number<input id="wa-num" placeholder="+91 98…"></label><label>Opening message<input id="wa-msg" value="Hi! I'd like to know more."></label></div>
+          <div class="wa-out"><img id="wa-qr" alt="QR code for your WhatsApp link" width="120" height="120" class="hidden"><div><input id="wa-link-out" readonly placeholder="Enter your number to get the link"><div class="drawer-actions"><button class="btn btn-sm" data-copy="wa-link-out">Copy link</button><a class="btn btn-ghost btn-sm hidden" id="wa-qr-dl" target="_blank" rel="noopener">Download QR</a></div></div></div></div>
+        <div class="panel int"><div class="int-h"><span class="ico">📥</span><div><h3>Import leads (CSV)</h3><p class="muted small">From Meta lead ads, Google Sheets or another CRM. Columns like name, phone, email, source, interest, budget are matched automatically.</p></div></div>
+          <label class="drop" id="drop"><input type="file" id="csv-file" accept=".csv,text/csv"><span>Drop a CSV here or <u>choose a file</u></span></label>
+          <p class="small muted" id="import-msg"></p></div>
+        <div class="panel int"><div class="int-h"><span class="ico">⚡</span><div><h3>Zapier, Make &amp; Google Sheets</h3><p class="muted small">Send every new lead to a webhook, and receive leads from Meta or Google lead ads.</p></div></div>
+          <label class="full">Outgoing webhook (new leads are POSTed here)<input id="hook-out" type="url" placeholder="https://hooks.zapier.com/…"></label>
+          <div class="drawer-actions"><button class="btn btn-sm" id="save-hook">Save</button><button class="btn btn-ghost btn-sm" id="test-hook">Send test lead</button></div>
+          <label class="full">Incoming lead URL (for Zapier / Make)<input id="hook-in" readonly></label>
+          <p class="small muted" id="hook-in-note"></p></div>
+        <div class="panel int wide"><h3>Connections</h3><ul class="conn" id="conn"></ul></div>
+      </div>
+    </section>
     <section id="view-settings" class="view hidden">
       <div class="panel">
         <h3>Pipeline stages</h3>

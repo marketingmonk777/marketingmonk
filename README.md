@@ -8,7 +8,7 @@ An AI sales system for growing businesses: website, WhatsApp AI agent, lead scor
 - [x] **Part 2: App + CRM** (`/app`). Sign-in, drag-and-drop pipeline with custom stages, lead profiles (Hot/Warm/Cold, budget, timeline, owner, value), activity log, follow-up tasks, dashboard, one-tap WhatsApp. Runs in demo mode (browser storage) or on Supabase's free tier.
 - [x] **Part 3: Monk AI + WhatsApp inbox.** Configurable AI qualifier (questions, hot/cold signals, handoff replies), test chat, shared inbox with take-over, auto-created scored leads and call tasks. Edge Functions for the WhatsApp Cloud API, with optional Gemini free tier for natural replies.
 - [x] **Part 4: Follow-ups + bookings.** Multi-step WhatsApp sequences (stop on reply, due-now queue, auto-send via `run-sequences`), public booking page at `/book/` with working hours, time zones and no double-booking, bookings view with done / no-show (no-show starts a rescue sequence).
-- [ ] **Part 5: Insights + integrations.** Dashboard, lead ads webhooks, Zapier.
+- [x] **Part 5: Insights + integrations.** Insights (trend, funnel, sources, Monk AI, follow-ups, show-up rate, team leaderboard, date ranges, CSV export) and Integrations (embeddable website form at `/capture/`, WhatsApp link + QR, CSV import with Meta-style columns, outgoing webhook trigger, `lead-intake` endpoint for Zapier / Make / lead ads).
 
 ## Brand
 | Colour | Hex |
@@ -60,3 +60,8 @@ Built clean-room: features inspired by the category, with original design, code 
        headers := '{"x-cron-secret":"<CRON_SECRET>","Content-Type":"application/json"}'::jsonb, body := '{}'::jsonb) $$);
    ```
 Without WhatsApp connected, the **Follow-ups → Due now** queue lets you send each message with one tap.
+
+## Integrations (Part 5)
+1. Run the updated `supabase/schema.sql` again (adds `integrations`, the website-form function and the new-lead webhook trigger). Enable `pg_net` for outgoing webhooks.
+2. Website form: Integrations → copy the embed code onto any site. It uses your booking-page handle, so save Bookings first.
+3. Incoming leads: `supabase functions deploy lead-intake --no-verify-jwt`, press Save under Zapier/Make once to create your private key, then point a Zap or Make scenario (for example "New Facebook Lead Ads lead") at the incoming URL shown.

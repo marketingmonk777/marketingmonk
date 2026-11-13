@@ -191,3 +191,55 @@ begin
 end $$;
 grant execute on function public.mm_booking_page(text) to anon, authenticated;
 grant execute on function public.mm_book(text, text, text, text, timestamptz, text) to anon, authenticated;
+
+-- ===== Part 5: integrations =====
+create table if not exists public.integrations (
+  owner uuid primary key default auth.uid() references auth.users(id) on delete cascade,
+  config jsonb not null default '{}'                  -- {webhook_out, intake_key, wa_number}
+);
+alter table public.integrations enable row level security;
+drop policy if exists "own rows" on public.integrations;
+create policy "own rows" on public.integrations for all using (owner = auth.uid()) with check (owner = auth.uid());
+
+-- Website form: public, uses your booking-page handle to find your workspace.
+create or replace function public.mm_capture_lead(p_slug text, p_name text, p_phone text, p_email text, p_interest text, p_page text)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare v_owner uuid; v_lead uuid; v_digits text;
+begin
+  select owner into v_owner from availability where slug = p_slug;
+  if v_owner is null then raise exception 'not found'; end if;
+  if length(coalesce(p_name,'')) not between 1 and 120 or length(coalesce(p_phone,'')) not between 6 and 30 then raise exception 'invalid details'; end if;
+  -- simple flood guard: at most 30 web leads per workspace per hour
+  if (select count(*) from leads where owner = v_owner and source = 'Website' and created_at > now() - interval '1 hour') >= 30 then raise exception 'rate limited'; end if;
+  v_digits := right(regexp_replace(p_phone, '\D', '', 'g'), 10);
+  select id into v_lead from leads where owner = v_owner and right(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 10) = v_digits limit 1;
+  if v_lead is not null then
+    insert into notes(owner, lead_id, kind, body) values (v_owner, v_lead, 'note', 'Filled the website form again: ' || coalesce(left(p_interest, 500), '(no message)'));
+    return v_lead;
+  end if;
+  insert into leads(owner, name, phone, email, source, score, stage_id, interest, tags)
+  values (v_owner, left(p_name, 120), p_phone, p_email, 'Website', 'warm', (select id from stages where owner = v_owner order by position limit 1), left(p_interest, 500), array['web-form'])
+  returning id into v_lead;
+  if p_page is not null then insert into notes(owner, lead_id, kind, body) values (v_owner, v_lead, 'note', 'Website form on ' || left(p_page, 300)); end if;
+  return v_lead;
+end $$;
+grant execute on function public.mm_capture_lead(text, text, text, text, text, text) to anon, authenticated;
+
+-- Outgoing webhook: POST every new lead to your Zapier / Make / Apps Script URL.
+-- Needs the pg_net extension (Database → Extensions → pg_net). Fails quietly without it.
+create or replace function public.mm_lead_webhook() returns trigger language plpgsql security definer set search_path = public as $$
+declare v_url text;
+begin
+  select config->>'webhook_out' into v_url from integrations where owner = new.owner;
+  if v_url like 'https://%' then
+    begin
+      perform net.http_post(url := v_url, headers := '{"Content-Type":"application/json"}'::jsonb,
+        body := jsonb_build_object('event', 'lead.created', 'lead', jsonb_build_object('id', new.id, 'name', new.name, 'phone', new.phone, 'email', new.email,
+          'source', new.source, 'score', new.score, 'interest', new.interest, 'budget', new.budget, 'timeline', new.timeline, 'created_at', new.created_at)));
+    exception when others then null;
+    end;
+  end if;
+  return new;
+end $$;
+drop trigger if exists leads_webhook on public.leads;
+create trigger leads_webhook after insert on public.leads for each row execute function public.mm_lead_webhook();

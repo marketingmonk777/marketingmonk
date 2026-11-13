@@ -87,7 +87,11 @@
     async saveLead(lead) {
       const now = new Date().toISOString();
       if (lead.id) { Object.assign(this.db.leads.find((l) => l.id === lead.id), lead, { updated_at: now }); }
-      else { lead = { ...lead, id: uid(), created_at: now, updated_at: now }; this.db.leads.push(lead); }
+      else {
+        lead = { ...lead, id: uid(), created_at: now, updated_at: now }; this.db.leads.push(lead);
+        const hook = this.db.integ?.webhook_out; // demo stand-in for the database trigger used in cloud mode
+        if (hook) fetch(hook, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ event: 'lead.created', lead }) }).catch(() => {});
+      }
       this.save(); return lead;
     }
     async deleteLead(id) { this.db.leads = this.db.leads.filter((l) => l.id !== id); this.db.notes = this.db.notes.filter((n) => n.lead_id !== id); this.db.tasks = this.db.tasks.filter((t) => t.lead_id !== id); this.save(); }
@@ -116,6 +120,8 @@
     async saveAvailability(a) { this.db.avail = a; this.save(); }
     async bookings() { return [...this.db.bookings].sort((a, b) => a.starts_at.localeCompare(b.starts_at)); }
     async updateBooking(id, patch) { Object.assign(this.db.bookings.find((b) => b.id === id), patch); this.save(); }
+    async integrations() { return this.db.integ || {}; }
+    async saveIntegrations(c) { this.db.integ = c; this.save(); }
   }
 
   /* ---------- Supabase store ---------- */
@@ -166,6 +172,8 @@
     async saveAvailability(a) { const { slug, ...config } = a; this.chk(await this.sb.from('availability').upsert({ slug, config })); }
     async bookings() { return this.chk(await this.sb.from('bookings').select('*').order('starts_at')); }
     async updateBooking(id, patch) { this.chk(await this.sb.from('bookings').update(patch).eq('id', id)); }
+    async integrations() { const r = this.chk(await this.sb.from('integrations').select('config').maybeSingle()); return r?.config || {}; }
+    async saveIntegrations(config) { this.chk(await this.sb.from('integrations').upsert({ config })); }
     async sendWhatsApp(conversation_id, body) { const { data, error } = await this.sb.functions.invoke('whatsapp-send', { body: { conversation_id, body } }); if (error) throw error; return data; }
   }
 
@@ -176,7 +184,7 @@
   const state = { stages: [], leads: [], tasks: [], convs: [], agent: null, seqs: [], enrolls: [], avail: null, bookings: [], activeSeq: null, activeConv: null, view: 'pipeline', editing: null };
 
   async function load() {
-    [state.stages, state.leads, state.tasks, state.convs, state.agent, state.seqs, state.enrolls, state.avail, state.bookings] = await Promise.all([store.stages(), store.leads(), store.tasks(), store.conversations(), store.agentConfig(), store.sequences(), store.enrollments(), store.availability(), store.bookings()]);
+    [state.stages, state.leads, state.tasks, state.convs, state.agent, state.seqs, state.enrolls, state.avail, state.bookings, state.integ] = await Promise.all([store.stages(), store.leads(), store.tasks(), store.conversations(), store.agentConfig(), store.sequences(), store.enrollments(), store.availability(), store.bookings(), store.integrations()]);
     render();
   }
 
@@ -192,11 +200,11 @@
     $$('.view').forEach((v) => v.classList.add('hidden'));
     $('#view-' + state.view).classList.remove('hidden');
     $$('.side nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === state.view));
-    $('#view-title').textContent = { pipeline: 'Pipeline', inbox: 'Inbox', leads: 'Leads', followups: 'Follow-ups', bookings: 'Bookings', tasks: 'Tasks', dashboard: 'Dashboard', agent: 'Monk AI', settings: 'Settings' }[state.view];
+    $('#view-title').textContent = { pipeline: 'Pipeline', inbox: 'Inbox', leads: 'Leads', followups: 'Follow-ups', bookings: 'Bookings', tasks: 'Tasks', dashboard: 'Insights', agent: 'Monk AI', integrations: 'Integrations', settings: 'Settings' }[state.view];
     const showFilters = ['pipeline', 'leads'].includes(state.view);
     $('#search').classList.toggle('hidden', !showFilters);
     $('#filter-score').classList.toggle('hidden', !showFilters);
-    ({ pipeline: renderBoard, inbox: renderInbox, leads: renderTable, followups: renderFollowups, bookings: renderBookings, tasks: renderTasks, dashboard: renderDash, agent: renderAgent, settings: renderSettings })[state.view]();
+    ({ pipeline: renderBoard, inbox: renderInbox, leads: renderTable, followups: renderFollowups, bookings: renderBookings, tasks: renderTasks, dashboard: renderDash, agent: renderAgent, integrations: renderIntegrations, settings: renderSettings })[state.view]();
     const unread = state.convs.filter((c) => c.unread).length; const ic = $('#inbox-count'); ic.textContent = unread; ic.classList.toggle('hidden', !unread);
     const due = dueEnrollments().length; const dc = $('#due-count'); dc.textContent = due; dc.classList.toggle('hidden', !due);
   }
@@ -237,24 +245,7 @@
     }).join('') : '<li class="empty">No tasks yet. Add your first follow-up.</li>';
   }
 
-  function renderDash() {
-    const L = state.leads;
-    const won = state.stages.find((s) => /won/i.test(s.name));
-    const wonN = won ? L.filter((l) => l.stage_id === won.id).length : 0;
-    const pipeVal = L.filter((l) => !won || l.stage_id !== won.id).reduce((a, l) => a + Number(l.value || 0), 0);
-    const hot = L.filter((l) => l.score === 'hot').length;
-    const week = L.filter((l) => Date.now() - new Date(l.created_at) < 7 * 864e5).length;
-    const overdue = state.tasks.filter((t) => !t.done && t.due_at && new Date(t.due_at) < new Date()).length;
-    $('#stats').innerHTML = [
-      ['Total leads', L.length], ['New this week', week], ['Hot leads', hot],
-      ['Win rate', L.length ? Math.round((wonN / L.length) * 100) + '%' : '0%'], ['Open pipeline', inr(pipeVal)], ['Overdue tasks', overdue],
-    ].map(([k, v]) => `<div class="stat"><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
-    const max = Math.max(1, ...state.stages.map((s) => L.filter((l) => l.stage_id === s.id).length));
-    $('#bars').innerHTML = state.stages.map((s) => { const n = L.filter((l) => l.stage_id === s.id).length; return `<div class="bar"><span>${esc(s.name)}</span><div><i style="width:${(n / max) * 100}%"></i></div><b>${n}</b></div>`; }).join('');
-    const src = {}; L.forEach((l) => { src[l.source || 'Other'] = (src[l.source || 'Other'] || 0) + 1; });
-    const smax = Math.max(1, ...Object.values(src));
-    $('#sources').innerHTML = Object.entries(src).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<div class="bar teal"><span>${esc(k)}</span><div><i style="width:${(n / smax) * 100}%"></i></div><b>${n}</b></div>`).join('') || '<p class="empty">No leads yet.</p>';
-  }
+
 
   function renderSettings() {
     $('#stage-list').innerHTML = state.stages.map((s, i) => `<li data-id="${s.id}"><input value="${esc(s.name)}" aria-label="Stage name"><button class="link up" ${i === 0 ? 'disabled' : ''}>↑</button><button class="link down" ${i === state.stages.length - 1 ? 'disabled' : ''}>↓</button><button class="x del" title="Delete stage">×</button></li>`).join('');
@@ -575,6 +566,163 @@
     $('#copy-book').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('#book-url').value); toast('Link copied'); } catch { $('#book-url').select(); } });
   }
 
+  /* ---------- Insights ---------- */
+  state.range = 30;
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '–');
+  const dur = (ms) => { if (ms == null) return '–'; const m = Math.round(ms / 6e4); return m < 1 ? '< 1 min' : m < 60 ? m + ' min' : m < 1440 ? (m / 60).toFixed(1) + ' h' : (m / 1440).toFixed(1) + ' d'; };
+  const inRange = (d) => !state.range || (d && Date.now() - new Date(d) <= state.range * 864e5);
+  function firstResponse(c) {
+    const ms = c.messages || []; const i = ms.findIndex((m) => m.from === 'lead'); if (i < 0) return null;
+    const r = ms.slice(i + 1).find((m) => m.from !== 'lead'); return r ? new Date(r.at) - new Date(ms[i].at) : null;
+  }
+  const median = (xs) => { const v = xs.filter((x) => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
+  function renderDash() {
+    $$('#range button').forEach((b) => b.classList.toggle('on', +b.dataset.d === state.range));
+    const L = state.leads.filter((l) => inRange(l.created_at));
+    const won = state.stages.find((s) => /won/i.test(s.name)), lost = state.stages.find((s) => /lost/i.test(s.name));
+    const isWon = (l) => won && l.stage_id === won.id;
+    const wonL = L.filter(isWon), wonVal = wonL.reduce((a, l) => a + Number(l.value || 0), 0);
+    const convs = state.convs.filter((c) => inRange(c.updated_at));
+    const bks = state.bookings.filter((b) => inRange(b.created_at));
+    const held = bks.filter((b) => b.status === 'done').length, noshow = bks.filter((b) => b.status === 'noshow').length;
+    const resp = median(convs.map(firstResponse));
+    $('#stats').innerHTML = [
+      ['New leads', L.length], ['Hot leads', `${L.filter((l) => l.score === 'hot').length} <small>${pct(L.filter((l) => l.score === 'hot').length, L.length)}</small>`],
+      ['Won', `${wonL.length} <small>${pct(wonL.length, L.length)}</small>`], ['Revenue won', inr(wonVal)],
+      ['Median first reply', dur(resp)], ['Calls booked', bks.length],
+    ].map(([k, v]) => `<div class="stat"><span class="muted small">${k}</span><b>${v}</b></div>`).join('');
+    // trend
+    const days = state.range || 30; const today = new Date(); today.setHours(0, 0, 0, 0);
+    const buckets = Array.from({ length: days }, (_, i) => ({ d: new Date(+today - (days - 1 - i) * 864e5), n: 0, hot: 0 }));
+    state.leads.forEach((l) => { const d = new Date(l.created_at); d.setHours(0, 0, 0, 0); const b = buckets.find((x) => +x.d === +d); if (b) { b.n++; if (l.score === 'hot') b.hot++; } });
+    const bmax = Math.max(1, ...buckets.map((b) => b.n));
+    $('#trend').innerHTML = `<div class="cols" style="--n:${days}">${buckets.map((b) => `<div class="colb" title="${fmtDate(b.d)}: ${b.n} leads, ${b.hot} hot"><i style="height:${(b.n / bmax) * 100}%"><em style="height:${b.n ? (b.hot / b.n) * 100 : 0}%"></em></i></div>`).join('')}</div>
+      <div class="axis"><span>${fmtDate(buckets[0].d)}</span><span><i class="lg"></i>All leads <i class="lg hot"></i>Hot</span><span>${fmtDate(buckets.at(-1).d)}</span></div>`;
+    // funnel: reached stage i or beyond (Lost excluded)
+    const order = state.stages.filter((s) => s !== lost);
+    const pos = (l) => order.findIndex((s) => s.id === l.stage_id);
+    const reach = order.map((s, i) => L.filter((l) => pos(l) >= i).length);
+    $('#bars').innerHTML = order.map((s, i) => `<div class="bar"><span>${esc(s.name)}</span><div><i style="width:${(reach[i] / Math.max(1, reach[0])) * 100}%"></i></div><b>${reach[i]}</b></div>`).join('')
+      + (lost ? `<p class="small muted">Lost: ${L.filter((l) => l.stage_id === lost.id).length}</p>` : '');
+    // sources
+    const src = {}; L.forEach((l) => { const k = l.source || 'Other'; const r = (src[k] ||= { n: 0, hot: 0, won: 0, val: 0 }); r.n++; if (l.score === 'hot') r.hot++; if (isWon(l)) { r.won++; r.val += Number(l.value || 0); } });
+    $('#sources').innerHTML = '<tr><th>Source</th><th>Leads</th><th>Hot</th><th>Won</th><th>Revenue</th></tr>' + (Object.entries(src).sort((a, b) => b[1].n - a[1].n).map(([k, r]) => `<tr><td>${esc(k)}</td><td>${r.n}</td><td>${pct(r.hot, r.n)}</td><td>${r.won}</td><td>${inr(r.val)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No leads in this period.</td></tr>');
+    // AI
+    const scored = convs.filter((c) => c.score);
+    const kv = (rows) => rows.map(([k, v]) => `<div><span class="muted">${k}</span><b>${v}</b></div>`).join('');
+    $('#ai-stats').innerHTML = kv([
+      ['Conversations', convs.length], ['Fully qualified', `${scored.length} (${pct(scored.length, convs.length)})`],
+      ['🔥 / 🌤️ / ❄️', ['hot', 'warm', 'cold'].map((s) => scored.filter((c) => c.score === s).length).join(' · ')],
+      ['Handed to your team', convs.filter((c) => c.status === 'human').length], ['Median first reply', dur(resp)],
+    ]);
+    const en = state.enrolls.filter((e) => inRange(e.created_at));
+    $('#fu-stats').innerHTML = kv([
+      ['Leads in sequences', en.length], ['Active now', en.filter((e) => e.status === 'active').length],
+      ['Stopped (replied or booked)', en.filter((e) => e.status === 'stopped').length], ['Completed', en.filter((e) => e.status === 'done').length],
+      ['Calls held / no-shows', `${held} / ${noshow}`], ['Show-up rate', pct(held, held + noshow)],
+    ]);
+    // team
+    const team = {}; L.forEach((l) => { const k = l.assigned_to || 'Unassigned'; const r = (team[k] ||= { n: 0, hot: 0, won: 0, val: 0 }); r.n++; if (l.score === 'hot') r.hot++; if (isWon(l)) { r.won++; r.val += Number(l.value || 0); } });
+    $('#team').innerHTML = '<tr><th>Rep</th><th>Leads</th><th>Hot</th><th>Won</th><th>Win rate</th><th>Revenue</th></tr>' + (Object.entries(team).sort((a, b) => b[1].val - a[1].val || b[1].n - a[1].n).map(([k, r], i) => `<tr><td>${i === 0 && r.won ? '🏆 ' : ''}${esc(k)}</td><td>${r.n}</td><td>${r.hot}</td><td>${r.won}</td><td>${pct(r.won, r.n)}</td><td>${inr(r.val)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">No leads in this period.</td></tr>');
+  }
+
+  /* ---------- CSV ---------- */
+  function toCSV(rows) { return rows.map((r) => r.map((v) => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',')).join('\n'); }
+  function parseCSV(text) {
+    const rows = []; let row = [], f = '', q = false;
+    for (let i = 0; i < text.length; i++) { const c = text[i];
+      if (q) { if (c === '"' && text[i + 1] === '"') { f += '"'; i++; } else if (c === '"') q = false; else f += c; }
+      else if (c === '"') q = true; else if (c === ',' || c === '\t') { row.push(f); f = ''; } else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; } else f += c; }
+    if (f || row.length) { row.push(f); rows.push(row); }
+    return rows.filter((r) => r.some((x) => x.trim()));
+  }
+  function exportCSV() {
+    const head = ['name', 'phone', 'email', 'source', 'score', 'stage', 'interest', 'budget', 'timeline', 'assigned_to', 'value', 'tags', 'created_at'];
+    const rows = state.leads.map((l) => [l.name, l.phone, l.email, l.source, l.score, stageName(l.stage_id), l.interest, l.budget, l.timeline, l.assigned_to, l.value, (l.tags || []).join('; '), l.created_at]);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + toCSV([head, ...rows])], { type: 'text/csv' }));
+    a.download = `marketingmonk-leads-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); toast(`Exported ${rows.length} leads`);
+  }
+  const ALIASES = { name: ['name', 'full name', 'full_name', 'lead name', 'customer name', 'contact name'], first: ['first name', 'first_name', 'firstname'], last: ['last name', 'last_name', 'lastname'],
+    phone: ['phone', 'phone number', 'phone_number', 'mobile', 'mobile number', 'whatsapp', 'whatsapp number', 'contact number'], email: ['email', 'email address', 'e-mail'],
+    source: ['source', 'lead source', 'platform', 'campaign_name', 'campaign'], interest: ['interest', 'requirement', 'product', 'service', 'looking for'], budget: ['budget'], timeline: ['timeline', 'when'], assigned_to: ['assigned to', 'owner', 'rep'], value: ['value', 'deal value', 'amount'] };
+  async function importCSV(file) {
+    const rows = parseCSV(await file.text()); if (rows.length < 2) return ($('#import-msg').textContent = 'That file has no rows to import.');
+    const head = rows[0].map((h) => h.trim().toLowerCase().replace(/^\ufeff/, ''));
+    const col = (k) => head.findIndex((h) => ALIASES[k].includes(h));
+    const idx = Object.fromEntries(Object.keys(ALIASES).map((k) => [k, col(k)]));
+    if (idx.name < 0 && idx.first < 0 && idx.phone < 0) return ($('#import-msg').textContent = 'Could not find a name or phone column.');
+    const seen = new Set(state.leads.map((l) => (l.phone || '').replace(/\D/g, '').slice(-10)).filter(Boolean));
+    let added = 0, dup = 0;
+    for (const r of rows.slice(1)) {
+      const g = (k) => (idx[k] >= 0 ? (r[idx[k]] || '').trim() : '');
+      const name = g('name') || [g('first'), g('last')].filter(Boolean).join(' ') || g('phone');
+      const phone = g('phone').replace(/^p:/, ''); const key = phone.replace(/\D/g, '').slice(-10);
+      if (!name) continue; if (key && seen.has(key)) { dup++; continue; } if (key) seen.add(key);
+      await store.saveLead({ name, phone, email: g('email'), source: g('source') || 'CSV import', score: 'warm', stage_id: state.stages[0]?.id || null, interest: g('interest'), budget: g('budget'), timeline: g('timeline'), assigned_to: g('assigned_to'), value: Number(g('value').replace(/[^\d.]/g, '')) || 0, tags: ['imported'] });
+      added++;
+    }
+    $('#import-msg').textContent = `Imported ${added} lead${added === 1 ? '' : 's'}${dup ? `, skipped ${dup} already in your CRM` : ''}.`;
+    toast(`Imported ${added} leads`); load();
+  }
+
+  /* ---------- Integrations ---------- */
+  const conn = () => JSON.parse(localStorage.getItem('mm_supabase') || '{}');
+  const handle = () => state.avail?.slug || '';
+  function captureUrl() {
+    const base = new URL('../capture/', location.href).href;
+    return store.mode === 'demo' ? base + '?demo=1' : `${base}?b=${encodeURIComponent(handle())}#${btoa(JSON.stringify({ u: conn().url, k: conn().key }))}`;
+  }
+  function renderIntegrations() {
+    const ig = state.integ || {};
+    $('#embed-code').value = `<iframe src="${captureUrl()}" title="Contact form" style="width:100%;max-width:480px;height:560px;border:0;border-radius:16px"></iframe>`;
+    $('#open-capture').href = captureUrl();
+    if (!$('#wa-num').value && ig.wa_number) $('#wa-num').value = ig.wa_number;
+    updateWa();
+    $('#hook-out').value = ig.webhook_out || '';
+    const intake = store.mode === 'cloud' && conn().url ? `${conn().url}/functions/v1/lead-intake?key=${ig.intake_key || '(save once to create)'}` : '';
+    $('#hook-in').value = intake || 'Available once Supabase is connected';
+    $('#hook-in-note').textContent = store.mode === 'cloud' ? 'POST JSON like {"name","phone","email","source"}. Keep this URL private: the key lets anyone add leads.' : 'Connect Supabase in Settings to receive leads from Zapier, Make, or Meta and Google lead ads.';
+    const items = [
+      ['Supabase (cloud sync)', store.mode === 'cloud', store.mode === 'cloud' ? 'Connected' : 'Demo mode. Connect in Settings'],
+      ['WhatsApp Cloud API', ig.wa_cloud === true, 'Set up on the server; see README "Go live on WhatsApp"'],
+      ['Gemini (smarter Monk AI replies)', ig.gemini === true, 'Optional, free key from Google AI Studio'],
+      ['Booking page', !!handle(), handle() ? 'Live at your handle "' + esc(handle()) + '"' : 'Set it up in Bookings'],
+      ['Outgoing webhook', !!ig.webhook_out, ig.webhook_out ? 'Sending new leads' : 'Not set'],
+    ];
+    $('#conn').innerHTML = items.map(([n, on, d]) => `<li><span class="dot ${on ? 'on' : ''}"></span><b>${n}</b><span class="small muted">${d}</span></li>`).join('');
+  }
+  function updateWa() {
+    const n = $('#wa-num').value.replace(/\D/g, ''); const out = n.length >= 8 ? `https://wa.me/${n}?text=${encodeURIComponent($('#wa-msg').value.trim())}` : '';
+    $('#wa-link-out').value = out;
+    const qr = out ? `https://api.qrserver.com/v1/create-qr-code/?size=360x360&margin=10&color=1E1B4B&data=${encodeURIComponent(out)}` : '';
+    $('#wa-qr').classList.toggle('hidden', !qr); $('#wa-qr-dl').classList.toggle('hidden', !qr);
+    if (qr) { $('#wa-qr').src = qr; $('#wa-qr-dl').href = qr; }
+  }
+  function leadPayload(l) { return { event: 'lead.created', lead: { name: l.name, phone: l.phone, email: l.email, source: l.source, score: l.score, stage: stageName(l.stage_id), interest: l.interest, budget: l.budget, timeline: l.timeline, created_at: l.created_at } }; }
+
+  function bindP5() {
+    $('#range').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { state.range = +b.dataset.d; renderDash(); } });
+    $('#export-csv').addEventListener('click', exportCSV);
+    $('#csv-file').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importCSV(f); e.target.value = ''; });
+    const drop = $('#drop');
+    ['dragover', 'dragenter'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, () => drop.classList.remove('over')));
+    drop.addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) importCSV(f); });
+    $$('[data-copy]').forEach((b) => b.addEventListener('click', async () => { const el = $('#' + b.dataset.copy); if (!el.value) return; try { await navigator.clipboard.writeText(el.value); toast('Copied'); } catch { el.select(); } }));
+    $('#wa-num').addEventListener('input', updateWa); $('#wa-msg').addEventListener('input', updateWa);
+    $('#wa-num').addEventListener('change', async () => { await store.saveIntegrations({ ...state.integ, wa_number: $('#wa-num').value.trim() }); state.integ = await store.integrations(); });
+    $('#save-hook').addEventListener('click', async () => {
+      const url = $('#hook-out').value.trim(); if (url && !/^https:\/\//.test(url)) return toast('Use an https:// webhook URL');
+      const ig = { ...state.integ, webhook_out: url }; if (!ig.intake_key) ig.intake_key = (crypto.randomUUID ? crypto.randomUUID() : uid()).replace(/-/g, '');
+      try { await store.saveIntegrations(ig); state.integ = await store.integrations(); toast('Saved'); renderIntegrations(); } catch (err) { toast(err.message); }
+    });
+    $('#test-hook').addEventListener('click', async () => {
+      const url = $('#hook-out').value.trim(); if (!url) return toast('Add a webhook URL first');
+      const sample = state.leads[0] || { name: 'Test Lead', phone: '+919800000000', source: 'Test', score: 'hot', created_at: new Date().toISOString() };
+      try { await fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ ...leadPayload(sample), test: true }) }); toast('Test lead sent. Check your Zap or scenario'); } catch { toast('Could not reach that URL'); }
+    });
+  }
+
   /* ---------- Auth ---------- */
   function bindAuth() {
     let signup = false;
@@ -598,12 +746,12 @@
     $('#mode-badge').textContent = store.mode === 'demo' ? 'Demo mode' : 'Cloud sync';
     $('#mode-badge').className = 'badge ' + store.mode;
     $('#user-email').textContent = sess?.email || '';
-    const h = location.hash.slice(1); if (['pipeline', 'inbox', 'leads', 'followups', 'bookings', 'tasks', 'dashboard', 'agent', 'settings'].includes(h)) state.view = h;
+    const h = location.hash.slice(1); if (['pipeline', 'inbox', 'leads', 'followups', 'bookings', 'tasks', 'dashboard', 'agent', 'integrations', 'settings'].includes(h)) state.view = h;
     try { await load(); } catch (err) { toast(err.message); }
   }
 
   async function boot() {
-    bind(); bindAuth(); bindAI(); bindP4();
+    bind(); bindAuth(); bindAI(); bindP4(); bindP5();
     if (cloud && (await cloud.session())) return start(cloud);
     if (!cloud && localStorage.getItem('mm_demo_on')) return start(new LocalStore());
     $('#auth').classList.remove('hidden');
