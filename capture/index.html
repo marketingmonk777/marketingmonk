@@ -45,6 +45,7 @@ h2{font-family:'Plus Jakarta Sans',sans-serif;color:var(--indigo)}
   <p class="by">Powered by MarketingMonk 🧘</p>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../assets/site-config.js"></script>
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
@@ -53,6 +54,13 @@ h2{font-family:'Plus Jakarta Sans',sans-serif;color:var(--indigo)}
   let biz = '';
   if (DEMO) { const db = JSON.parse(localStorage.getItem('mm_demo_v1') || '{}'); biz = db.agent?.business_name || 'MarketingMonk'; }
   if (biz) $('#biz').textContent = 'Talk to ' + biz;
+
+  const site = () => window.MM_SITE || {};
+  function conn() {
+    try { const h = JSON.parse(atob(location.hash.slice(1) || 'e30=')); if (h.u) return h; } catch {}
+    return site().supabaseUrl && site().publishableKey ? { u: site().supabaseUrl.replace(/\/+$/, ''), k: site().publishableKey } : {};
+  }
+  const slug = () => qs.get('b') || site().handle || '';
 
   async function submit(l) {
     if (DEMO) {
@@ -63,10 +71,18 @@ h2{font-family:'Plus Jakarta Sans',sans-serif;color:var(--indigo)}
       else (db.leads ||= []).push({ id: id(), name: l.name, phone: l.phone, email: l.email, source: 'Website', score: 'warm', stage_id: db.stages?.[0]?.id || null, interest: l.interest, budget: '', timeline: '', assigned_to: '', value: 0, tags: ['web-form'], created_at: now, updated_at: now });
       localStorage.setItem('mm_demo_v1', JSON.stringify(db)); return;
     }
-    const c = JSON.parse(atob(location.hash.slice(1) || 'e30='));
-    if (!c.u || !window.supabase) throw new Error('This form is not connected yet.');
+    const c = conn();
+    if (!c.u) {
+      const to = (window.MM_SITE || {}).fallbackEmail;
+      if (!to) throw new Error('This form is not connected yet.');
+      const body = `Name: ${l.name}\nWhatsApp: ${l.phone}\nEmail: ${l.email || '-'}\nLooking for: ${l.interest || '-'}`;
+      $('#done p').textContent = 'Your email app is opening with your details. Press send and we\'ll reply on WhatsApp shortly.';
+      window.open(`mailto:${to}?subject=${encodeURIComponent('New enquiry from ' + l.name)}&body=${encodeURIComponent(body)}`, '_top');
+      return;
+    }
+    if (!window.supabase) throw new Error('Could not send right now. Please try again.');
     const sb = window.supabase.createClient(c.u, c.k);
-    const { error } = await sb.rpc('mm_capture_lead', { p_slug: qs.get('b'), p_name: l.name, p_phone: l.phone, p_email: l.email || null, p_interest: l.interest || null, p_page: document.referrer || null });
+    const { error } = await sb.rpc('mm_capture_lead', { p_slug: slug(), p_name: l.name, p_phone: l.phone, p_email: l.email || null, p_interest: l.interest || null, p_page: document.referrer || null });
     if (error) throw new Error('Could not send right now. Please try again.');
   }
 
@@ -76,8 +92,10 @@ h2{font-family:'Plus Jakarta Sans',sans-serif;color:var(--indigo)}
     try {
       await submit({ name: f.elements.name.value.trim(), phone: f.elements.phone.value.trim(), email: f.elements.email.value.trim(), interest: f.elements.interest.value.trim() });
       f.classList.add('hidden'); $('#done').classList.remove('hidden');
-      const book = new URL('../book/', location.href); book.search = location.search; book.hash = location.hash;
-      $('#book').href = book.href; $('#book').classList.remove('hidden');
+      if (DEMO || conn().u) {
+        const book = new URL('../book/', location.href); book.search = DEMO ? location.search : '?b=' + encodeURIComponent(slug()); book.hash = location.hash;
+        $('#book').href = book.href; $('#book').classList.remove('hidden');
+      }
     } catch (err) { $('#err').textContent = err.message; $('#err').classList.remove('hidden'); }
     $('#go').disabled = false;
   });

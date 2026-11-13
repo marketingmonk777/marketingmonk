@@ -76,6 +76,7 @@ input:focus,textarea:focus{outline:2px solid #2DD4BF;border-color:transparent}
   <p class="foot">Scheduling by MarketingMonk 🧘</p>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../assets/site-config.js"></script>
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
@@ -93,7 +94,10 @@ input:focus,textarea:focus{outline:2px solid #2DD4BF;border-color:transparent}
         busy = new Set((db.bookings || []).filter((b) => b.status !== 'cancelled').map((b) => new Date(b.starts_at).getTime()));
         return;
       }
-      const conn = JSON.parse(atob(location.hash.slice(1) || 'e30='));
+      let conn = {}; try { conn = JSON.parse(atob(location.hash.slice(1) || 'e30=')); } catch {}
+      const S = window.MM_SITE || {};
+      if (!conn.u && S.supabaseUrl && S.publishableKey) conn = { u: S.supabaseUrl.replace(/\/+$/, ''), k: S.publishableKey };
+      if (!qs.get('b') && S.handle) qs.set('b', S.handle);
       if (!conn.u || !window.supabase) throw new Error('This booking link is incomplete.');
       sb = window.supabase.createClient(conn.u, conn.k);
       const { data, error } = await sb.rpc('mm_booking_page', { p_slug: qs.get('b') });

@@ -67,3 +67,6 @@ h1 span{color:var(--saffron-d);white-space:nowrap}
 @media(max-width:900px){.hero-in{grid-template-columns:1fr}.grid4,.cards{grid-template-columns:repeat(2,1fr)}.flow{grid-template-columns:repeat(2,1fr)}.links a:not(.btn){display:none}}
 @media(max-width:520px){.grid4,.cards,.flow{grid-template-columns:1fr}section{padding:64px 0}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;opacity:1!important}}
+.cta-form{display:block;width:100%;max-width:480px;height:510px;margin:0 auto;border:0;border-radius:18px;background:transparent}
+.cta-alt{margin:1rem 0 0;font-size:.92rem;opacity:.8}.cta-alt a{color:#fff;text-decoration:underline}
+@media (max-width:520px){.cta-form{height:540px}}
