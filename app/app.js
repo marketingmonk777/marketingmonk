@@ -178,8 +178,14 @@
   }
 
   /* ---------- State ---------- */
-  const cfg = JSON.parse(localStorage.getItem('mm_supabase') || 'null');
-  const cloud = cfg && window.supabase ? new SupaStore(cfg.url, cfg.key) : null;
+  let cfg = null, cloud = null, bootIssue = '';
+  try { cfg = JSON.parse(localStorage.getItem('mm_supabase') || 'null'); } catch { localStorage.removeItem('mm_supabase'); }
+  if (cfg) {
+    cfg.url = String(cfg.url || '').trim().replace(/\/+$/, '');
+    if (!/^https:\/\/[a-z0-9-]+\.supabase\.(co|in)$/i.test(cfg.url || '')) bootIssue = 'The saved Project URL looks wrong. It should look like https://abcd1234.supabase.co (Project Settings → API).';
+    else if (!window.supabase) bootIssue = 'Couldn\'t load the Supabase library. Check your connection or ad blocker, then refresh.';
+    else { try { cloud = new SupaStore(cfg.url, cfg.key); } catch (e) { bootIssue = 'Couldn\'t connect to Supabase: ' + e.message; } }
+  }
   let store = null;
   const state = { stages: [], leads: [], tasks: [], convs: [], agent: null, seqs: [], enrolls: [], avail: null, bookings: [], activeSeq: null, activeConv: null, view: 'pipeline', editing: null };
 
@@ -747,14 +753,32 @@
     $('#mode-badge').className = 'badge ' + store.mode;
     $('#user-email').textContent = sess?.email || '';
     const h = location.hash.slice(1); if (['pipeline', 'inbox', 'leads', 'followups', 'bookings', 'tasks', 'dashboard', 'agent', 'integrations', 'settings'].includes(h)) state.view = h;
-    try { await load(); } catch (err) { toast(err.message); }
+    try { await load(); } catch (err) {
+      console.error(err); try { render(); } catch (e2) { console.error(e2); }
+      const m = String(err.message || err);
+      toast(/schema cache|does not exist|relation/i.test(m) ? 'Your database tables are missing. Run supabase/schema.sql in the Supabase SQL Editor, then refresh.' : m);
+    }
   }
 
+  function showAuth(msg) {
+    $('#shell').classList.add('hidden'); $('#auth').classList.remove('hidden');
+    if (msg) { $('#auth-msg').textContent = msg; $('#reset-conn').classList.remove('hidden'); }
+  }
   async function boot() {
-    bind(); bindAuth(); bindAI(); bindP4(); bindP5();
-    if (cloud && (await cloud.session())) return start(cloud);
-    if (!cloud && localStorage.getItem('mm_demo_on')) return start(new LocalStore());
-    $('#auth').classList.remove('hidden');
+    const rc = $('#reset-conn');
+    rc.addEventListener('click', (e) => { e.preventDefault(); localStorage.removeItem('mm_supabase'); location.reload(); });
+    try {
+      bind(); bindAuth(); bindAI(); bindP4(); bindP5();
+      if (bootIssue) return showAuth(bootIssue);
+      if (cloud) {
+        let sess = null;
+        try { sess = await Promise.race([cloud.session(), new Promise((_, r) => setTimeout(() => r(new Error('Supabase didn\'t respond. Check the Project URL, or that the project isn\'t paused.')), 10000))]); }
+        catch (e) { return showAuth(e.message); }
+        if (sess) return await start(cloud);
+      }
+      if (!cloud && localStorage.getItem('mm_demo_on')) return await start(new LocalStore());
+      showAuth();
+    } catch (e) { console.error(e); showAuth('Something went wrong while starting: ' + e.message); }
   }
   document.addEventListener('DOMContentLoaded', boot);
 })();
