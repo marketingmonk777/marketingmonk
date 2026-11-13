@@ -65,6 +65,13 @@ Deno.serve(async (req) => {
     ({ data: conv } = await db.from('conversations').insert({ owner: OWNER, lead_id: lead?.id, name, phone, channel: 'whatsapp' }).select().single());
   }
 
+  // A reply pauses any follow-up sequence that is set to stop on reply.
+  if (conv.lead_id) {
+    const { data: active } = await db.from('enrollments').select('id, sequences(stop_on_reply)').eq('lead_id', conv.lead_id).eq('status', 'active');
+    const stop = (active ?? []).filter((e: any) => e.sequences?.stop_on_reply).map((e: any) => e.id);
+    if (stop.length) await db.from('enrollments').update({ status: 'stopped' }).in('id', stop);
+  }
+
   const messages = [...(conv.messages || []), { from: 'lead', body: text, at }];
   let patch: Record<string, unknown> = { messages, unread: (conv.unread || 0) + 1 };
 

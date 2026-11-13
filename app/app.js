@@ -16,9 +16,34 @@
 
   const DEFAULT_STAGES = ['New', 'Contacted', 'Qualified', 'Demo booked', 'Won', 'Lost'];
 
+  const DEFAULT_SEQS = () => [
+    { id: uid(), name: 'New lead nurture', stop_on_reply: true, steps: [
+      { delay_days: 0, body: 'Hi {name}, thanks for your interest in {business}! Here is a quick overview. Any questions, just reply here. 🙏' },
+      { delay_days: 1, body: 'Hi {name}, did you get a chance to look? I can hold a quick call slot for you: {booking_link}' },
+      { delay_days: 3, body: '{name}, many of our customers started exactly where you are. Happy to share a few examples, shall I?' },
+      { delay_days: 7, body: 'Last check-in from {business}, {name}. If now is not the right time, no problem. Just reply "later" and we will reach out next month.' },
+    ] },
+    { id: uid(), name: 'No-show rescue', stop_on_reply: true, steps: [
+      { delay_days: 0, body: 'Hi {name}, we missed you on the call today. Want to pick a new time? {booking_link}' },
+      { delay_days: 2, body: 'Hi {name}, just making sure this did not slip. Book any slot that suits you: {booking_link}' },
+    ] },
+  ];
+  const DEFAULT_AVAIL = { title: 'Discovery call', slug: 'marketingmonk', days: [1, 2, 3, 4, 5, 6], start: '10:00', end: '18:00', slot_minutes: 30, window_days: 14, note: 'A quick, friendly call to understand what you need.', tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
+
   /* ---------- Local demo store ---------- */
   class LocalStore {
-    constructor() { this.key = 'mm_demo_v1'; this.db = JSON.parse(localStorage.getItem(this.key) || 'null') || this.seed(); this.save(); }
+    constructor() {
+      this.key = 'mm_demo_v1'; this.db = JSON.parse(localStorage.getItem(this.key) || 'null') || this.seed();
+      const d = this.db; d.convs ||= []; d.seqs ||= DEFAULT_SEQS(); d.enrolls ||= []; d.avail ||= { ...DEFAULT_AVAIL }; d.bookings ||= [];
+      if (!d.p4seed) { d.p4seed = 1; const l = d.leads; const h = (x) => new Date(Date.now() + x * 3600e3).toISOString();
+        if (l[1]) d.enrolls.push({ id: uid(), lead_id: l[1].id, sequence_id: d.seqs[0].id, step: 1, next_at: h(-1), status: 'active', created_at: h(-25) });
+        if (l[4]) d.enrolls.push({ id: uid(), lead_id: l[4].id, sequence_id: d.seqs[0].id, step: 0, next_at: h(-0.2), status: 'active', created_at: h(-0.3) });
+        if (l[3]) d.enrolls.push({ id: uid(), lead_id: l[3].id, sequence_id: d.seqs[0].id, step: 2, next_at: h(30), status: 'active', created_at: h(-40) });
+        const tmr = new Date(); tmr.setDate(tmr.getDate() + 1); tmr.setHours(11, 0, 0, 0);
+        if (l[2]) d.bookings.push({ id: uid(), lead_id: l[2].id, name: l[2].name, phone: l[2].phone, email: '', starts_at: tmr.toISOString(), ends_at: new Date(+tmr + 30 * 6e4).toISOString(), note: 'Wants to discuss the clinic package', status: 'booked', created_at: h(-2) });
+      }
+      this.save();
+    }
     get mode() { return 'demo'; }
     save() { localStorage.setItem(this.key, JSON.stringify(this.db)); }
     seed() {
@@ -51,7 +76,7 @@
         ] };
       return { stages, leads, notes, tasks, convs: [conv], agent: null };
     }
-    reset() { this.db = this.seed(); this.save(); }
+    reset() { localStorage.removeItem(this.key); this.db = new LocalStore().db; }
     async session() { return localStorage.getItem('mm_demo_on') ? { email: 'demo@marketingmonk' } : null; }
     async signOut() { localStorage.removeItem('mm_demo_on'); }
     async stages() { return [...this.db.stages].sort((a, b) => a.position - b.position); }
@@ -81,6 +106,16 @@
       this.save(); return c;
     }
     async sendWhatsApp() { return { simulated: true }; }
+    async sequences() { return this.db.seqs; }
+    async saveSequence(q) { if (!q.id) { q = { ...q, id: uid() }; this.db.seqs.push(q); } else this.db.seqs = this.db.seqs.map((x) => (x.id === q.id ? q : x)); this.save(); return q; }
+    async deleteSequence(id) { this.db.seqs = this.db.seqs.filter((x) => x.id !== id); this.db.enrolls = this.db.enrolls.filter((e) => e.sequence_id !== id); this.save(); }
+    async enrollments() { return this.db.enrolls; }
+    async enroll(e) { const r = { ...e, id: uid(), created_at: new Date().toISOString() }; this.db.enrolls.push(r); this.save(); return r; }
+    async updateEnrollment(id, patch) { Object.assign(this.db.enrolls.find((e) => e.id === id), patch); this.save(); }
+    async availability() { return this.db.avail; }
+    async saveAvailability(a) { this.db.avail = a; this.save(); }
+    async bookings() { return [...this.db.bookings].sort((a, b) => a.starts_at.localeCompare(b.starts_at)); }
+    async updateBooking(id, patch) { Object.assign(this.db.bookings.find((b) => b.id === id), patch); this.save(); }
   }
 
   /* ---------- Supabase store ---------- */
@@ -121,6 +156,16 @@
       if (id) return this.chk(await this.sb.from('conversations').update(row).eq('id', id).select().single());
       return this.chk(await this.sb.from('conversations').insert(row).select().single());
     }
+    async sequences() { return this.chk(await this.sb.from('sequences').select('*').order('created_at')); }
+    async saveSequence(q) { const { id, owner, created_at, ...row } = q; return id ? this.chk(await this.sb.from('sequences').update(row).eq('id', id).select().single()) : this.chk(await this.sb.from('sequences').insert(row).select().single()); }
+    async deleteSequence(id) { this.chk(await this.sb.from('sequences').delete().eq('id', id)); }
+    async enrollments() { return this.chk(await this.sb.from('enrollments').select('*')); }
+    async enroll(e) { return this.chk(await this.sb.from('enrollments').insert(e).select().single()); }
+    async updateEnrollment(id, patch) { this.chk(await this.sb.from('enrollments').update(patch).eq('id', id)); }
+    async availability() { const r = this.chk(await this.sb.from('availability').select('*').maybeSingle()); return r ? { ...r.config, slug: r.slug } : { ...DEFAULT_AVAIL, slug: 'mm-' + Math.random().toString(36).slice(2, 8) }; }
+    async saveAvailability(a) { const { slug, ...config } = a; this.chk(await this.sb.from('availability').upsert({ slug, config })); }
+    async bookings() { return this.chk(await this.sb.from('bookings').select('*').order('starts_at')); }
+    async updateBooking(id, patch) { this.chk(await this.sb.from('bookings').update(patch).eq('id', id)); }
     async sendWhatsApp(conversation_id, body) { const { data, error } = await this.sb.functions.invoke('whatsapp-send', { body: { conversation_id, body } }); if (error) throw error; return data; }
   }
 
@@ -128,10 +173,10 @@
   const cfg = JSON.parse(localStorage.getItem('mm_supabase') || 'null');
   const cloud = cfg && window.supabase ? new SupaStore(cfg.url, cfg.key) : null;
   let store = null;
-  const state = { stages: [], leads: [], tasks: [], convs: [], agent: null, activeConv: null, view: 'pipeline', editing: null };
+  const state = { stages: [], leads: [], tasks: [], convs: [], agent: null, seqs: [], enrolls: [], avail: null, bookings: [], activeSeq: null, activeConv: null, view: 'pipeline', editing: null };
 
   async function load() {
-    [state.stages, state.leads, state.tasks, state.convs, state.agent] = await Promise.all([store.stages(), store.leads(), store.tasks(), store.conversations(), store.agentConfig()]);
+    [state.stages, state.leads, state.tasks, state.convs, state.agent, state.seqs, state.enrolls, state.avail, state.bookings] = await Promise.all([store.stages(), store.leads(), store.tasks(), store.conversations(), store.agentConfig(), store.sequences(), store.enrollments(), store.availability(), store.bookings()]);
     render();
   }
 
@@ -147,12 +192,13 @@
     $$('.view').forEach((v) => v.classList.add('hidden'));
     $('#view-' + state.view).classList.remove('hidden');
     $$('.side nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === state.view));
-    $('#view-title').textContent = { pipeline: 'Pipeline', inbox: 'Inbox', leads: 'Leads', tasks: 'Tasks', dashboard: 'Dashboard', agent: 'Monk AI', settings: 'Settings' }[state.view];
+    $('#view-title').textContent = { pipeline: 'Pipeline', inbox: 'Inbox', leads: 'Leads', followups: 'Follow-ups', bookings: 'Bookings', tasks: 'Tasks', dashboard: 'Dashboard', agent: 'Monk AI', settings: 'Settings' }[state.view];
     const showFilters = ['pipeline', 'leads'].includes(state.view);
     $('#search').classList.toggle('hidden', !showFilters);
     $('#filter-score').classList.toggle('hidden', !showFilters);
-    ({ pipeline: renderBoard, inbox: renderInbox, leads: renderTable, tasks: renderTasks, dashboard: renderDash, agent: renderAgent, settings: renderSettings })[state.view]();
+    ({ pipeline: renderBoard, inbox: renderInbox, leads: renderTable, followups: renderFollowups, bookings: renderBookings, tasks: renderTasks, dashboard: renderDash, agent: renderAgent, settings: renderSettings })[state.view]();
     const unread = state.convs.filter((c) => c.unread).length; const ic = $('#inbox-count'); ic.textContent = unread; ic.classList.toggle('hidden', !unread);
+    const due = dueEnrollments().length; const dc = $('#due-count'); dc.textContent = due; dc.classList.toggle('hidden', !due);
   }
 
   function card(l) {
@@ -229,7 +275,7 @@
     const wa = $('#wa-link'); const digits = (l?.phone || '').replace(/\D/g, '');
     wa.classList.toggle('hidden', !digits); if (digits) wa.href = `https://wa.me/${digits}`;
     $('#lead-extra').classList.toggle('hidden', !l);
-    if (l) await renderNotes();
+    if (l) { await renderNotes(); renderLeadSeq(); }
     $('#drawer').classList.remove('hidden'); $('#scrim').classList.remove('hidden');
     f.elements.name.focus();
   }
@@ -410,6 +456,125 @@
     $('#sim-note').addEventListener('click', (e) => { if (e.target.id === 'sim-restart') { e.preventDefault(); simReset(); } });
   }
 
+  /* ---------- Follow-up sequences ---------- */
+  const first = (n) => String(n || '').trim().split(/\s+/)[0] || 'there';
+  function bookingUrl() {
+    const base = new URL('../book/', location.href).href;
+    if (store.mode === 'demo') return base + '?demo=1';
+    const c = JSON.parse(localStorage.getItem('mm_supabase') || '{}');
+    return `${base}?b=${encodeURIComponent(state.avail?.slug || '')}#${btoa(JSON.stringify({ u: c.url, k: c.key }))}`;
+  }
+  const personalise = (body, lead) => String(body || '').replaceAll('{name}', first(lead?.name)).replaceAll('{business}', state.agent?.business_name || 'our team').replaceAll('{booking_link}', bookingUrl());
+  const seqById = (id) => state.seqs.find((q) => q.id === id);
+  const leadById = (id) => state.leads.find((l) => l.id === id);
+  function dueEnrollments() { const now = Date.now(); return state.enrolls.filter((e) => e.status === 'active' && new Date(e.next_at) <= now && seqById(e.sequence_id) && leadById(e.lead_id)); }
+  function nextAt(seq, step, fromISO) {
+    const cur = seq.steps[step - 1], nxt = seq.steps[step];
+    if (!nxt) return null;
+    return new Date(new Date(fromISO).getTime() + Math.max(0, (nxt.delay_days - (cur?.delay_days || 0))) * 86400e3).toISOString();
+  }
+  async function advance(e, how) {
+    const seq = seqById(e.sequence_id); const lead = leadById(e.lead_id); const step = seq.steps[e.step];
+    if (how === 'sent') await store.addNote({ lead_id: lead.id, kind: 'whatsapp', body: `Follow-up (${seq.name}, step ${e.step + 1}): ${personalise(step.body, lead)}` });
+    const n = e.step + 1; const at = nextAt(seq, n, new Date().toISOString());
+    await store.updateEnrollment(e.id, at ? { step: n, next_at: at } : { step: n, status: 'done', next_at: null });
+  }
+  async function startSequence(lead_id, sequence_id) {
+    const seq = seqById(sequence_id); if (!seq?.steps?.length) return toast('That sequence has no steps');
+    await Promise.all(state.enrolls.filter((e) => e.lead_id === lead_id && e.status === 'active').map((e) => store.updateEnrollment(e.id, { status: 'stopped' })));
+    await store.enroll({ lead_id, sequence_id, step: 0, status: 'active', next_at: new Date(Date.now() + seq.steps[0].delay_days * 86400e3).toISOString() });
+    toast(`${seq.name} started`);
+  }
+  function renderFollowups() {
+    const due = dueEnrollments();
+    $('#due-list').innerHTML = due.length ? due.map((e) => {
+      const seq = seqById(e.sequence_id), lead = leadById(e.lead_id), msg = personalise(seq.steps[e.step].body, lead), digits = (lead.phone || '').replace(/\D/g, '');
+      return `<div class="due" data-id="${e.id}"><div class="due-who"><b>${esc(lead.name)}</b><span class="small muted">${esc(seq.name)} · step ${e.step + 1} of ${seq.steps.length}</span></div>
+        <p class="due-msg">${esc(msg)}</p>
+        <div class="drawer-actions">${digits ? `<a class="btn btn-sm" data-act="send" href="https://wa.me/${digits}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">Send on WhatsApp</a>` : '<span class="small muted">No phone number</span>'}<button class="btn btn-ghost btn-sm" data-act="skip">Skip</button><button class="btn btn-danger btn-sm" data-act="stop">Stop</button></div></div>`;
+    }).join('') : '<p class="empty">All caught up. 🧘 Nothing due right now.</p>';
+    if (!seqById(state.activeSeq)) state.activeSeq = state.seqs[0]?.id || null;
+    $('#seq-list').innerHTML = state.seqs.map((q) => { const n = state.enrolls.filter((e) => e.sequence_id === q.id && e.status === 'active').length;
+      return `<button class="seq ${q.id === state.activeSeq ? 'active' : ''}" data-id="${q.id}"><b>${esc(q.name)}</b><span class="small muted">${q.steps.length} steps · ${n} active</span></button>`; }).join('') || '<p class="empty small">No sequences yet.</p>';
+    fillSeqForm(seqById(state.activeSeq));
+  }
+  const stepRow = (st = { delay_days: 0, body: '' }) => `<div class="step-row"><label class="small">Day<input type="number" min="0" max="90" class="st-day" value="${st.delay_days}"></label><textarea class="st-body" rows="2" placeholder="Message">${esc(st.body)}</textarea><button type="button" class="x">×</button></div>`;
+  function fillSeqForm(q) {
+    const f = $('#seq-form'); f.dataset.id = q?.id || '';
+    f.elements.name.value = q?.name || ''; f.elements.stop_on_reply.checked = q ? !!q.stop_on_reply : true;
+    $('#step-list').innerHTML = (q?.steps || [{ delay_days: 0, body: '' }]).map(stepRow).join('');
+    $('#del-seq').classList.toggle('hidden', !q);
+    const en = q ? state.enrolls.filter((e) => e.sequence_id === q.id && e.status !== 'stopped' && leadById(e.lead_id)) : [];
+    $('#enrolled-list').innerHTML = en.map((e) => `<li><a href="#" data-lead="${e.lead_id}">${esc(leadById(e.lead_id).name)}</a><span class="small muted">${e.status === 'done' ? 'Finished' : `Step ${e.step + 1} · ${fmtDT(e.next_at)}`}</span></li>`).join('') || '<li class="empty small">Nobody yet. Start this from any lead.</li>';
+  }
+  function renderLeadSeq() {
+    const l = state.editing; if (!l) return;
+    const act = state.enrolls.find((e) => e.lead_id === l.id && e.status === 'active');
+    const seq = act && seqById(act.sequence_id);
+    $('#lead-seq').innerHTML = seq
+      ? `<div class="row-form"><span class="pill-seq">🔁 ${esc(seq.name)} · step ${act.step + 1} of ${seq.steps.length}, next ${fmtDT(act.next_at)}</span><button type="button" class="btn btn-danger btn-sm" id="lead-seq-stop" data-id="${act.id}">Stop</button></div>`
+      : `<div class="row-form"><select id="lead-seq-pick">${state.seqs.map((q) => `<option value="${q.id}">${esc(q.name)}</option>`).join('')}</select><button type="button" class="btn btn-sm" id="lead-seq-start" ${state.seqs.length ? '' : 'disabled'}>Start</button></div>`;
+  }
+
+  /* ---------- Bookings ---------- */
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  function renderBookings() {
+    const now = Date.now();
+    const bs = state.bookings.filter((b) => b.status !== 'cancelled' && new Date(b.ends_at || b.starts_at) >= now - 864e5);
+    $('#booking-list').innerHTML = bs.map((b) => { const d = new Date(b.starts_at);
+      return `<li class="booking ${b.status}" data-id="${b.id}"><div class="bdate"><b>${d.getDate()}</b><span>${d.toLocaleDateString('en-IN', { month: 'short' })}</span></div>
+        <div><b>${esc(b.name)}</b><span class="small muted">${d.toLocaleDateString('en-IN', { weekday: 'short' })}, ${d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} · ${esc(b.phone || b.email || '')}</span>${b.note ? `<span class="small">${esc(b.note)}</span>` : ''}</div>
+        <div class="drawer-actions">${b.lead_id ? '<button class="btn btn-ghost btn-sm" data-act="lead">Lead</button>' : ''}${b.status === 'booked' ? '<button class="btn btn-ghost btn-sm" data-act="done">Done</button><button class="btn btn-danger btn-sm" data-act="noshow">No-show</button>' : `<span class="st">${b.status === 'done' ? '✓ Done' : 'No-show'}</span>`}</div></li>`; }).join('') || '<li class="empty">No calls booked yet. Share your booking page.</li>';
+    const a = state.avail || DEFAULT_AVAIL, f = $('#avail-form');
+    ['title', 'slug', 'start', 'end', 'note'].forEach((k) => { f.elements[k].value = a[k] ?? ''; });
+    f.elements.slot_minutes.value = String(a.slot_minutes); f.elements.window_days.value = String(a.window_days);
+    f.elements.slug.disabled = store.mode === 'demo';
+    $('#days').innerHTML = DAYS.map((d, i) => `<label class="day"><input type="checkbox" value="${i}" ${a.days.includes(i) ? 'checked' : ''}><span>${d}</span></label>`).join('');
+    $('#book-url').value = bookingUrl(); $('#open-book').href = bookingUrl();
+  }
+
+  function bindP4() {
+    $('#due-list').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-act]'); if (!b) return; const en = state.enrolls.find((x) => x.id === b.closest('.due').dataset.id);
+      if (b.dataset.act === 'stop') await store.updateEnrollment(en.id, { status: 'stopped' });
+      else await advance(en, b.dataset.act === 'send' ? 'sent' : 'skip');
+      toast({ send: 'Logged and moved to the next step', skip: 'Skipped', stop: 'Sequence stopped' }[b.dataset.act]); load();
+    });
+    $('#seq-list').addEventListener('click', (e) => { const b = e.target.closest('.seq'); if (b) { state.activeSeq = b.dataset.id; renderFollowups(); } });
+    $('#new-seq').addEventListener('click', () => { state.activeSeq = null; $$('.seq').forEach((x) => x.classList.remove('active')); fillSeqForm(null); $('#seq-form').elements.name.focus(); });
+    $('#add-step').addEventListener('click', () => { const last = $$('.st-day').at(-1); $('#step-list').insertAdjacentHTML('beforeend', stepRow({ delay_days: last ? +last.value + 2 : 0, body: '' })); });
+    $('#step-list').addEventListener('click', (e) => { if (e.target.matches('.x') && $$('.step-row').length > 1) e.target.closest('.step-row').remove(); });
+    $('#seq-form').addEventListener('submit', async (e) => {
+      e.preventDefault(); const f = e.target;
+      const steps = $$('.step-row').map((r) => ({ delay_days: Math.max(0, +r.querySelector('.st-day').value || 0), body: r.querySelector('.st-body').value.trim() })).filter((s) => s.body).sort((a, b) => a.delay_days - b.delay_days);
+      if (!steps.length) return toast('Add at least one message');
+      try { const q = await store.saveSequence({ ...(f.dataset.id ? seqById(f.dataset.id) : {}), name: f.elements.name.value.trim(), stop_on_reply: f.elements.stop_on_reply.checked, steps }); state.activeSeq = q.id; toast('Sequence saved'); load(); } catch (err) { toast(err.message); }
+    });
+    $('#del-seq').addEventListener('click', async () => { const q = seqById($('#seq-form').dataset.id); if (q && confirm(`Delete "${q.name}"? Leads in it will stop.`)) { await store.deleteSequence(q.id); state.activeSeq = null; load(); } });
+    $('#enrolled-list').addEventListener('click', (e) => { const a = e.target.closest('[data-lead]'); if (a) { e.preventDefault(); openLead(a.dataset.lead); } });
+    $('#lead-seq').addEventListener('click', async (e) => {
+      if (e.target.id === 'lead-seq-start') { await startSequence(state.editing.id, $('#lead-seq-pick').value); }
+      else if (e.target.id === 'lead-seq-stop') { await store.updateEnrollment(e.target.dataset.id, { status: 'stopped' }); toast('Sequence stopped'); }
+      else return;
+      await load(); renderLeadSeq();
+    });
+    $('#booking-list').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-act]'); if (!b) return; const bk = state.bookings.find((x) => x.id === b.closest('.booking').dataset.id);
+      if (b.dataset.act === 'lead') return openLead(bk.lead_id);
+      await store.updateBooking(bk.id, { status: b.dataset.act === 'done' ? 'done' : 'noshow' });
+      if (bk.lead_id) await store.addNote({ lead_id: bk.lead_id, kind: 'call', body: b.dataset.act === 'done' ? `Call held (${fmtDT(bk.starts_at)})` : `No-show for ${fmtDT(bk.starts_at)}` });
+      if (b.dataset.act === 'noshow' && bk.lead_id) { const ns = state.seqs.find((q) => /no.?show/i.test(q.name)); if (ns) await startSequence(bk.lead_id, ns.id); }
+      toast(b.dataset.act === 'done' ? 'Marked done' : 'Marked no-show'); load();
+    });
+    $('#avail-form').addEventListener('submit', async (e) => {
+      e.preventDefault(); const f = e.target;
+      const a = { title: f.elements.title.value.trim(), slug: f.elements.slug.value.trim() || state.avail.slug, start: f.elements.start.value, end: f.elements.end.value, slot_minutes: +f.elements.slot_minutes.value, window_days: +f.elements.window_days.value, note: f.elements.note.value.trim(), days: $$('#days input:checked').map((c) => +c.value), tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
+      if (a.start >= a.end) return toast('The day must end after it starts');
+      try { await store.saveAvailability(a); toast('Availability saved'); load(); } catch (err) { toast(/duplicate|unique/i.test(err.message) ? 'That handle is taken, try another' : err.message); }
+    });
+    $('#copy-book').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('#book-url').value); toast('Link copied'); } catch { $('#book-url').select(); } });
+  }
+
   /* ---------- Auth ---------- */
   function bindAuth() {
     let signup = false;
@@ -433,12 +598,12 @@
     $('#mode-badge').textContent = store.mode === 'demo' ? 'Demo mode' : 'Cloud sync';
     $('#mode-badge').className = 'badge ' + store.mode;
     $('#user-email').textContent = sess?.email || '';
-    const h = location.hash.slice(1); if (['pipeline', 'inbox', 'leads', 'tasks', 'dashboard', 'agent', 'settings'].includes(h)) state.view = h;
+    const h = location.hash.slice(1); if (['pipeline', 'inbox', 'leads', 'followups', 'bookings', 'tasks', 'dashboard', 'agent', 'settings'].includes(h)) state.view = h;
     try { await load(); } catch (err) { toast(err.message); }
   }
 
   async function boot() {
-    bind(); bindAuth(); bindAI();
+    bind(); bindAuth(); bindAI(); bindP4();
     if (cloud && (await cloud.session())) return start(cloud);
     if (!cloud && localStorage.getItem('mm_demo_on')) return start(new LocalStore());
     $('#auth').classList.remove('hidden');

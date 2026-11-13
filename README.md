@@ -7,7 +7,7 @@ An AI sales system for growing businesses: website, WhatsApp AI agent, lead scor
 - [x] **Part 1: Brand + launch site.** Animated monk logo, palette, typography, landing page (`/`) and brand kit (`/brand`). Static HTML/CSS on GitHub Pages.
 - [x] **Part 2: App + CRM** (`/app`). Sign-in, drag-and-drop pipeline with custom stages, lead profiles (Hot/Warm/Cold, budget, timeline, owner, value), activity log, follow-up tasks, dashboard, one-tap WhatsApp. Runs in demo mode (browser storage) or on Supabase's free tier.
 - [x] **Part 3: Monk AI + WhatsApp inbox.** Configurable AI qualifier (questions, hot/cold signals, handoff replies), test chat, shared inbox with take-over, auto-created scored leads and call tasks. Edge Functions for the WhatsApp Cloud API, with optional Gemini free tier for natural replies.
-- [ ] **Part 4: Follow-up sequences + bookings.** Timed steps, auto-pause on reply, rich media, appointment slots.
+- [x] **Part 4: Follow-ups + bookings.** Multi-step WhatsApp sequences (stop on reply, due-now queue, auto-send via `run-sequences`), public booking page at `/book/` with working hours, time zones and no double-booking, bookings view with done / no-show (no-show starts a rescue sequence).
 - [ ] **Part 5: Insights + integrations.** Dashboard, lead ads webhooks, Zapier.
 
 ## Brand
@@ -42,3 +42,21 @@ Built clean-room: features inspired by the category, with original design, code 
    ```
 4. In Meta → WhatsApp → Configuration, set the callback URL to `https://<project>.supabase.co/functions/v1/whatsapp-webhook`, the verify token from step 3, and subscribe to `messages`.
 5. Message your test number. Monk AI replies, scores the lead, and it appears in Inbox and Pipeline.
+
+## Automate follow-ups and bookings (Part 4)
+1. Run the updated `supabase/schema.sql` again (adds `sequences`, `enrollments`, `availability`, `bookings` and the two public booking functions).
+2. Open **Bookings** in the app, pick a page handle and hours, save, and share the link it shows.
+3. Deploy the sender and schedule it every 15 minutes:
+   ```bash
+   supabase functions deploy run-sequences --no-verify-jwt
+   supabase secrets set CRON_SECRET=pick-a-long-random-word BOOKING_BASE_URL=https://marketingmonk777.github.io/marketingmonk/book/
+   # optional, for messages sent more than 24h after the lead last wrote:
+   supabase secrets set WHATSAPP_TEMPLATE=<approved template with one {{1}}> WHATSAPP_TEMPLATE_LANG=en
+   ```
+   Then in the SQL editor (enable the `pg_cron` and `pg_net` extensions first):
+   ```sql
+   select cron.schedule('mm-followups', '*/15 * * * *', $$
+     select net.http_post(url := 'https://<project>.supabase.co/functions/v1/run-sequences',
+       headers := '{"x-cron-secret":"<CRON_SECRET>","Content-Type":"application/json"}'::jsonb, body := '{}'::jsonb) $$);
+   ```
+Without WhatsApp connected, the **Follow-ups → Due now** queue lets you send each message with one tap.

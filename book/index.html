@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Book a call · MarketingMonk</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--indigo:#1E1B4B;--saffron:#F28C28;--saffron-d:#E5761C;--teal:#14B8A6;--cream:#FFF7ED;--ink:#0F172A;--mist:#E2E8F0;--muted:#64748B}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,sans-serif;color:var(--ink);background:linear-gradient(180deg,var(--indigo) 0 230px,#F8FAFC 230px);min-height:100vh;padding:28px 16px 48px}
+h1,h2{font-family:'Plus Jakarta Sans',sans-serif;color:var(--indigo);letter-spacing:-.01em}
+.wrap{max-width:860px;margin:0 auto}
+.brand{display:flex;align-items:center;gap:10px;color:#fff;font-family:'Plus Jakarta Sans';font-weight:800;margin-bottom:22px}
+.brand span{color:var(--saffron)}
+.card{background:#fff;border-radius:20px;box-shadow:0 20px 50px rgba(15,23,42,.15);display:grid;grid-template-columns:280px 1fr;overflow:hidden}
+.info{padding:28px;background:var(--cream);border-right:1px solid var(--mist);display:grid;align-content:start;gap:10px}
+.info h1{font-size:1.5rem}.muted{color:var(--muted)}.small{font-size:.85rem}
+.meta{display:flex;gap:8px;flex-wrap:wrap}.meta span{background:#fff;border-radius:999px;padding:4px 12px;font-size:.82rem;font-weight:600}
+.pick{padding:28px;display:grid;gap:18px;align-content:start}
+.dates{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.date{flex:0 0 64px;border:1.5px solid var(--mist);border-radius:14px;padding:8px 0;text-align:center;cursor:pointer;background:#fff;font:inherit;color:inherit;display:grid}
+.date b{font-size:1.3rem;font-family:'Plus Jakarta Sans'}.date small{font-size:.7rem;color:var(--muted);text-transform:uppercase}
+.date.on{background:var(--indigo);border-color:var(--indigo);color:#fff}.date.on small{color:var(--saffron)}
+.date:disabled{opacity:.35;cursor:default}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.slot{border:1.5px solid var(--teal);color:#0F766E;background:#fff;border-radius:10px;padding:10px 0;font:inherit;font-weight:600;cursor:pointer}
+.slot:hover,.slot.on{background:var(--teal);color:#fff}
+form{display:grid;gap:10px}
+input,textarea{font:inherit;padding:11px 12px;border:1px solid var(--mist);border-radius:10px;width:100%}
+input:focus,textarea:focus{outline:2px solid #2DD4BF;border-color:transparent}
+.btn{background:var(--saffron);color:#fff;border:0;border-radius:999px;padding:13px 22px;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;text-align:center}
+.btn:hover{background:var(--saffron-d)}.btn:disabled{opacity:.6}
+.btn-ghost{background:#fff;color:var(--indigo);box-shadow:inset 0 0 0 1.5px var(--indigo)}
+.done{text-align:center;padding:48px 28px;display:grid;gap:14px;justify-items:center}
+.done .tick{width:72px;height:72px;border-radius:50%;background:#CCFBF1;display:grid;place-items:center;font-size:2rem;animation:pop .4s ease}
+@keyframes pop{from{transform:scale(.4);opacity:0}}
+.hidden{display:none!important}.err{color:#DC2626;font-size:.9rem}
+.foot{text-align:center;margin-top:18px;font-size:.8rem;color:var(--muted)}
+@media(max-width:720px){.card{grid-template-columns:1fr}.info{border-right:0;border-bottom:1px solid var(--mist)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><img src="../assets/logo-mark.svg" width="40" height="40" alt=""><div id="biz">Marketing<span>Monk</span></div></div>
+  <div class="card" id="card">
+    <aside class="info">
+      <p class="small muted">Book a time</p>
+      <h1 id="title">Loading…</h1>
+      <div class="meta"><span id="len">⏱ 30 min</span><span>📞 Phone / WhatsApp</span></div>
+      <p class="muted" id="note"></p>
+      <p class="small muted" id="tz"></p>
+    </aside>
+    <section class="pick" id="pick">
+      <h2 style="font-size:1.1rem">Pick a day</h2>
+      <div class="dates" id="dates"></div>
+      <h2 style="font-size:1.1rem" id="slot-h">Available times</h2>
+      <div class="slots" id="slots"></div>
+      <form id="form" class="hidden">
+        <h2 style="font-size:1.1rem" id="form-h">Your details</h2>
+        <input name="name" placeholder="Your name" required autocomplete="name">
+        <input name="phone" placeholder="WhatsApp number, e.g. +91 98…" required autocomplete="tel" pattern="[+0-9 ()-]{8,}">
+        <input name="email" type="email" placeholder="Email (optional)" autocomplete="email">
+        <textarea name="note" rows="2" placeholder="Anything we should know? (optional)"></textarea>
+        <button class="btn" id="go">Confirm booking</button>
+        <p class="err hidden" id="err"></p>
+      </form>
+    </section>
+  </div>
+  <div class="card hidden" id="ok"><div class="done" style="grid-column:1/-1">
+    <div class="tick">✓</div><h1>You're booked!</h1><p class="muted" id="ok-when"></p>
+    <a class="btn btn-ghost" id="gcal" target="_blank" rel="noopener">Add to Google Calendar</a>
+  </div></div>
+  <p class="foot">Scheduling by MarketingMonk 🧘</p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const qs = new URLSearchParams(location.search);
+  const DEMO = qs.has('demo');
+  const DEFAULT = { title: 'Discovery call', days: [1, 2, 3, 4, 5, 6], start: '10:00', end: '18:00', slot_minutes: 30, window_days: 14, note: '' };
+  const state = { days: [] };
+  let cfg = DEFAULT, busy = new Set(), biz = 'MarketingMonk', sb = null, day = null, slot = null;
+
+  const backend = {
+    async load() {
+      if (DEMO) {
+        const db = JSON.parse(localStorage.getItem('mm_demo_v1') || '{}');
+        cfg = { ...DEFAULT, ...(db.avail || {}) }; biz = db.agent?.business_name || biz;
+        busy = new Set((db.bookings || []).filter((b) => b.status !== 'cancelled').map((b) => new Date(b.starts_at).getTime()));
+        return;
+      }
+      const conn = JSON.parse(atob(location.hash.slice(1) || 'e30='));
+      if (!conn.u || !window.supabase) throw new Error('This booking link is incomplete.');
+      sb = window.supabase.createClient(conn.u, conn.k);
+      const { data, error } = await sb.rpc('mm_booking_page', { p_slug: qs.get('b') });
+      if (error || !data) throw new Error('This booking page could not be found.');
+      cfg = { ...DEFAULT, ...data.config }; biz = data.business || biz;
+      busy = new Set((data.busy || []).map((t) => new Date(t).getTime()));
+    },
+    async book(b) {
+      if (DEMO) {
+        const db = JSON.parse(localStorage.getItem('mm_demo_v1') || '{}');
+        if ((db.bookings || []).some((x) => x.status !== 'cancelled' && +new Date(x.starts_at) === +new Date(b.starts_at))) throw new Error('That slot was just taken. Pick another.');
+        const id = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
+        const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+        const now = new Date().toISOString();
+        const stage = (db.stages || []).find((s) => /demo|book|meet|visit/i.test(s.name));
+        let lead = (db.leads || []).find((l) => digits(l.phone) && digits(l.phone) === digits(b.phone));
+        if (!lead) { lead = { id: id(), name: b.name, phone: b.phone, email: b.email, source: 'Booking page', score: 'hot', stage_id: stage?.id || db.stages?.[0]?.id || null, interest: b.note, budget: '', timeline: 'Booked a call', assigned_to: '', value: 0, tags: ['booked'], created_at: now, updated_at: now }; db.leads.push(lead); }
+        else { lead.score = 'hot'; if (stage) lead.stage_id = stage.id; lead.updated_at = now; }
+        db.bookings = db.bookings || []; db.bookings.push({ id: id(), lead_id: lead.id, ...b, status: 'booked', created_at: now });
+        db.notes = db.notes || []; db.notes.push({ id: id(), lead_id: lead.id, kind: 'call', body: `Booked "${cfg.title}" for ${new Date(b.starts_at).toLocaleString('en-IN')}` + (b.note ? ` · ${b.note}` : ''), created_at: now });
+        (db.enrolls || []).forEach((e) => { if (e.lead_id === lead.id && e.status === 'active') e.status = 'stopped'; });
+        localStorage.setItem('mm_demo_v1', JSON.stringify(db)); return;
+      }
+      const { error } = await sb.rpc('mm_book', { p_slug: qs.get('b'), p_name: b.name, p_phone: b.phone, p_email: b.email || null, p_starts_at: b.starts_at, p_note: b.note || null });
+      if (error) throw new Error(/taken/i.test(error.message) ? 'That slot was just taken. Pick another.' : 'Could not book right now. Please try again.');
+    },
+  };
+
+  // Slots follow the owner's working hours in the owner's time zone, then display in the visitor's.
+  const TZ = () => cfg.tz || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const partsIn = (t, tz) => Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short' }).formatToParts(t).map((p) => [p.type, p.value]));
+  const offsetOf = (t, tz) => { const p = partsIn(t, tz); return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - (Math.floor(+t / 6e4) * 6e4); };
+  const atTime = (d, hm) => { const [h, m] = hm.split(':').map(Number); const guess = Date.UTC(d.y, d.m, d.d, h, m); return new Date(guess - offsetOf(new Date(guess), TZ())); };
+  function slotsFor(d) {
+    const out = [], end = atTime(d, cfg.end), step = cfg.slot_minutes * 6e4, soon = Date.now() + 60 * 6e4;
+    for (let t = atTime(d, cfg.start); +t + step <= +end; t = new Date(+t + step)) if (+t > soon && !busy.has(+t)) out.push(t);
+    return out;
+  }
+  function renderDates() {
+    const p = partsIn(new Date(), TZ()); const days = [];
+    for (let i = 0; i < cfg.window_days; i++) { const u = new Date(Date.UTC(+p.year, +p.month - 1, +p.day + i, 12)); days.push({ y: u.getUTCFullYear(), m: u.getUTCMonth(), d: u.getUTCDate(), wd: u.getUTCDay(), key: i, label: u }); }
+    const usable = days.map((d) => cfg.days.includes(d.wd) && slotsFor(d).length > 0);
+    if (day === null) day = days[usable.indexOf(true)] || null;
+    const fmt = (u, o) => u.toLocaleDateString('en-IN', { timeZone: 'UTC', ...o });
+    $('#dates').innerHTML = days.map((d, i) => `<button type="button" class="date ${day && d.key === day.key ? 'on' : ''}" data-i="${i}" ${usable[i] ? '' : 'disabled'}><small>${fmt(d.label, { weekday: 'short' })}</small><b>${d.d}</b><small>${fmt(d.label, { month: 'short' })}</small></button>`).join('');
+    state.days = days;
+    renderSlots();
+  }
+  function renderSlots() {
+    const s = day ? slotsFor(day) : [];
+    $('#slot-h').textContent = day ? `Available times · ${day.label.toLocaleDateString('en-IN', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' })}` : 'No open times right now';
+    $('#slots').innerHTML = s.map((t) => `<button type="button" class="slot ${slot && +slot === +t ? 'on' : ''}" data-t="${+t}">${t.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</button>`).join('') || '<p class="muted small">Nothing free on this day.</p>';
+  }
+  $('#dates').addEventListener('click', (e) => { const b = e.target.closest('.date'); if (!b || b.disabled) return; day = state.days[+b.dataset.i]; slot = null; $('#form').classList.add('hidden'); renderDates(); });
+  $('#slots').addEventListener('click', (e) => { const b = e.target.closest('.slot'); if (!b) return; slot = new Date(+b.dataset.t); renderSlots(); $('#form-h').textContent = 'Your details · ' + slot.toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); $('#form').classList.remove('hidden'); $('#form').elements.name.focus(); });
+  $('#form').addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = e.target; $('#go').disabled = true; $('#err').classList.add('hidden');
+    const ends = new Date(+slot + cfg.slot_minutes * 6e4);
+    const b = { name: f.elements.name.value.trim(), phone: f.elements.phone.value.trim(), email: f.elements.email.value.trim(), note: f.elements.note.value.trim(), starts_at: slot.toISOString(), ends_at: ends.toISOString() };
+    try {
+      await backend.book(b);
+      $('#card').classList.add('hidden'); $('#ok').classList.remove('hidden');
+      $('#ok-when').textContent = `${cfg.title} with ${biz} on ${slot.toLocaleString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })}. We'll reach you on ${b.phone}.`;
+      const z = (d) => d.toISOString().replace(/[-:]|\.\d{3}/g, '');
+      $('#gcal').href = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(cfg.title + ' · ' + biz)}&dates=${z(slot)}/${z(ends)}&details=${encodeURIComponent('Booked via ' + location.href.split('#')[0])}`;
+    } catch (err) { $('#err').textContent = err.message; $('#err').classList.remove('hidden'); busy.add(+slot); slot = null; renderDates(); }
+    $('#go').disabled = false;
+  });
+
+  backend.load().then(() => {
+    document.title = `${cfg.title} · ${biz}`;
+    $('#title').textContent = cfg.title; $('#len').textContent = `⏱ ${cfg.slot_minutes} min`; $('#note').textContent = cfg.note || '';
+    $('#biz').textContent = biz; $('#tz').textContent = 'Times shown in your time zone (' + Intl.DateTimeFormat().resolvedOptions().timeZone + ')';
+    renderDates();
+  }).catch((err) => { $('#title').textContent = 'Booking unavailable'; $('#note').textContent = err.message; $('#pick').innerHTML = ''; });
+})();
+</script>
+</body>
+</html>
