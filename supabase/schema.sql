@@ -243,3 +243,23 @@ begin
 end $$;
 drop trigger if exists leads_webhook on public.leads;
 create trigger leads_webhook after insert on public.leads for each row execute function public.mm_lead_webhook();
+
+-- ===== Part 7: sales desk (quotations) =====
+-- Quick replies, sales team and quote letterhead live in integrations.config.
+create table if not exists public.quotes (
+  id uuid primary key default gen_random_uuid(),
+  owner uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  lead_id uuid references public.leads(id) on delete set null,
+  number text not null,
+  status text not null default 'draft' check (status in ('draft','sent','accepted','rejected')),
+  items jsonb not null default '[]',          -- [{desc, qty, unit, rate}]
+  gst numeric not null default 18,
+  valid_days int not null default 15,
+  terms text default '',
+  total numeric not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.quotes enable row level security;
+drop policy if exists "own rows" on public.quotes;
+create policy "own rows" on public.quotes for all using (owner = auth.uid()) with check (owner = auth.uid());

@@ -46,6 +46,13 @@
         { delay_days: 60, body: 'Hi {name}, checking in on your PTFE stock. We can also hold material for scheduled monthly dispatches.' },
       ] },
     ],
+    quick_replies: [
+      { title: 'Ask for drawing', body: 'Hi {name}, please share the drawing or exact dimensions (thickness × width × length, or OD × ID × length) so we can quote accurately.' },
+      { title: 'Grade check', body: 'Hi {name}, do you need virgin PTFE, or will a filled grade (glass, carbon, bronze) work? Please share the operating temperature and media.' },
+      { title: 'Quote in progress', body: 'Hi {name}, thanks! Our team is preparing your quotation. You will have it here within 2 working hours.' },
+      { title: 'Dispatch update', body: 'Hi {name}, your PTFE order has been dispatched. We will share the LR / tracking details shortly.' },
+      { title: 'Technical call', body: 'Hi {name}, happy to go over the application with our technical team. Pick a slot: {booking_link}' },
+    ],
     booking: { title: 'Technical discussion', note: 'A short call to go over your drawing, grade and quantity.', slot_minutes: 30 },
     // Demo-only sample leads (fictional companies) so the board looks like a real PTFE desk.
     samples: [

@@ -120,6 +120,8 @@
     async saveAvailability(a) { this.db.avail = a; this.save(); }
     async bookings() { return [...this.db.bookings].sort((a, b) => a.starts_at.localeCompare(b.starts_at)); }
     async updateBooking(id, patch) { Object.assign(this.db.bookings.find((b) => b.id === id), patch); this.save(); }
+    async quotes() { return [...(this.db.quotes ||= [])].sort((a, b) => b.created_at.localeCompare(a.created_at)); }
+    async saveQuote(q) { const now = new Date().toISOString(); this.db.quotes ||= []; if (!q.id) { q = { ...q, id: uid(), created_at: now, updated_at: now }; this.db.quotes.push(q); } else { q = { ...q, updated_at: now }; this.db.quotes = this.db.quotes.map((x) => (x.id === q.id ? q : x)); } this.save(); return q; }
     async integrations() { return this.db.integ || {}; }
     async saveIntegrations(c) { this.db.integ = c; this.save(); }
   }
@@ -172,6 +174,8 @@
     async saveAvailability(a) { const { slug, ...config } = a; this.chk(await this.sb.from('availability').upsert({ slug, config })); }
     async bookings() { return this.chk(await this.sb.from('bookings').select('*').order('starts_at')); }
     async updateBooking(id, patch) { this.chk(await this.sb.from('bookings').update(patch).eq('id', id)); }
+    async quotes() { return this.chk(await this.sb.from('quotes').select('*').order('created_at', { ascending: false })); }
+    async saveQuote(q) { const { id, owner, created_at, ...row } = q; row.updated_at = new Date().toISOString(); return id ? this.chk(await this.sb.from('quotes').update(row).eq('id', id).select().single()) : this.chk(await this.sb.from('quotes').insert(row).select().single()); }
     async integrations() { const r = this.chk(await this.sb.from('integrations').select('config').maybeSingle()); return r?.config || {}; }
     async saveIntegrations(config) { this.chk(await this.sb.from('integrations').upsert({ config })); }
     async sendWhatsApp(conversation_id, body) { const { data, error } = await this.sb.functions.invoke('whatsapp-send', { body: { conversation_id, body } }); if (error) throw error; return data; }
@@ -187,11 +191,13 @@
     else { try { cloud = new SupaStore(cfg.url, cfg.key); } catch (e) { bootIssue = 'Couldn\'t connect to Supabase: ' + e.message; } }
   }
   let store = null;
-  const state = { stages: [], leads: [], tasks: [], convs: [], agent: null, seqs: [], enrolls: [], avail: null, bookings: [], activeSeq: null, activeConv: null, view: 'pipeline', editing: null };
+  const state = { quotes: [], stages: [], leads: [], tasks: [], convs: [], agent: null, seqs: [], enrolls: [], avail: null, bookings: [], activeSeq: null, activeConv: null, view: 'pipeline', editing: null };
 
   async function load() {
     [state.stages, state.leads, state.tasks, state.convs, state.agent, state.seqs, state.enrolls, state.avail, state.bookings, state.integ] = await Promise.all([store.stages(), store.leads(), store.tasks(), store.conversations(), store.agentConfig(), store.sequences(), store.enrollments(), store.availability(), store.bookings(), store.integrations()]);
-    render();
+    try { state.quotes = await store.quotes(); } catch { state.quotes = []; }
+    await autoAssign();
+    render(); checkSLA();
   }
 
   function filtered() {
@@ -206,11 +212,11 @@
     $$('.view').forEach((v) => v.classList.add('hidden'));
     $('#view-' + state.view).classList.remove('hidden');
     $$('.side nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === state.view));
-    $('#view-title').textContent = { pipeline: 'Pipeline', inbox: 'Inbox', leads: 'Leads', followups: 'Follow-ups', bookings: 'Bookings', tasks: 'Tasks', dashboard: 'Insights', agent: 'Monk AI', integrations: 'Integrations', settings: 'Settings' }[state.view];
+    $('#view-title').textContent = { pipeline: 'Pipeline', inbox: 'Inbox', leads: 'Leads', followups: 'Follow-ups', bookings: 'Bookings', tasks: 'Tasks', dashboard: 'Insights', agent: 'Monk AI', integrations: 'Integrations', settings: 'Settings', quotes: 'Quotes' }[state.view];
     const showFilters = ['pipeline', 'leads'].includes(state.view);
     $('#search').classList.toggle('hidden', !showFilters);
     $('#filter-score').classList.toggle('hidden', !showFilters);
-    ({ pipeline: renderBoard, inbox: renderInbox, leads: renderTable, followups: renderFollowups, bookings: renderBookings, tasks: renderTasks, dashboard: renderDash, agent: renderAgent, integrations: renderIntegrations, settings: renderSettings })[state.view]();
+    ({ pipeline: renderBoard, inbox: renderInbox, leads: renderTable, followups: renderFollowups, bookings: renderBookings, tasks: renderTasks, dashboard: renderDash, agent: renderAgent, integrations: renderIntegrations, settings: renderSettings, quotes: renderQuotes })[state.view]();
     const unread = state.convs.filter((c) => c.unread).length; const ic = $('#inbox-count'); ic.textContent = unread; ic.classList.toggle('hidden', !unread);
     const due = dueEnrollments().length; const dc = $('#due-count'); dc.textContent = due; dc.classList.toggle('hidden', !due);
   }
@@ -256,6 +262,10 @@
   function renderSettings() {
     $('#stage-list').innerHTML = state.stages.map((s, i) => `<li data-id="${s.id}"><input value="${esc(s.name)}" aria-label="Stage name"><button class="link up" ${i === 0 ? 'disabled' : ''}>↑</button><button class="link down" ${i === state.stages.length - 1 ? 'disabled' : ''}>↓</button><button class="x del" title="Delete stage">×</button></li>`).join('');
     $('#reset-demo').closest('.panel').classList.toggle('hidden', store.mode !== 'demo');
+    const ig = state.integ || {}, tf = $('#team-form');
+    tf.elements.reps.value = (ig.reps || []).join(', '); tf.elements.round_robin.checked = !!ig.round_robin; tf.elements.sla.value = ig.sla_minutes || 15;
+    $('#notif-btn').classList.toggle('hidden', !('Notification' in window) || Notification.permission === 'granted');
+    $('#qr-list').innerHTML = quickReplies().map((q, i) => `<li data-i="${i}"><span><b>${esc(q.title)}</b> <span class="small muted">${esc(q.body)}</span></span><button class="x del" title="Delete">×</button></li>`).join('');
     const cur = state.agent?.industry;
     $('#preset-list').innerHTML = (window.MMPresets?.list || []).map((p) => `<div class="preset ${cur === p.id ? 'on' : ''}"><span class="preset-icon">${p.icon}</span><div><b>${esc(p.name)}</b>${cur === p.id ? ' <span class="pill">Active</span>' : ''}<p class="small muted">${esc(p.blurb)}</p></div>${p.soon ? '<button class="btn btn-ghost btn-sm" disabled>Coming soon</button>' : `<button class="btn btn-sm" data-preset="${p.id}">${cur === p.id ? 'Re-apply' : 'Apply'}</button>`}</div>`).join('');
   }
@@ -307,6 +317,8 @@
     const wa = $('#wa-link'); const digits = (l?.phone || '').replace(/\D/g, '');
     wa.classList.toggle('hidden', !digits); if (digits) wa.href = `https://wa.me/${digits}`;
     $('#lead-extra').classList.toggle('hidden', !l);
+    $('#mark-contacted').classList.toggle('hidden', !l || isContacted(l)); $('#lead-quote').classList.toggle('hidden', !l);
+    $('#lead-qr').innerHTML = quickReplies().map((q, i) => `<option value="${i}">${esc(q.title)}</option>`).join('');
     if (l) { await renderNotes(); renderLeadSeq(); }
     $('#drawer').classList.remove('hidden'); $('#scrim').classList.remove('hidden');
     f.elements.name.focus();
@@ -339,7 +351,7 @@
     $('#board').addEventListener('drop', async (e) => {
       const col = e.target.closest('.col'); if (!col || !dragId) return; e.preventDefault();
       const lead = state.leads.find((l) => l.id === dragId); const to = col.dataset.stage || null;
-      if (lead && lead.stage_id !== to) { lead.stage_id = to; render(); try { await store.saveLead({ id: lead.id, stage_id: to }); toast(`Moved to ${stageName(to)}`); } catch (err) { toast(err.message); load(); } }
+      if (lead && lead.stage_id !== to) { lead.stage_id = to; render(); try { await store.saveLead({ id: lead.id, stage_id: to, ...contactedPatch(lead) }); toast(`Moved to ${stageName(to)}`); } catch (err) { toast(err.message); load(); } }
       dragId = null;
     });
 
@@ -352,7 +364,7 @@
       try { await store.saveLead(fd); toast(state.editing ? 'Lead updated' : 'Lead added'); closeLead(); load(); } catch (err) { toast(err.message); }
     });
     $('#delete-lead').addEventListener('click', async () => { if (!state.editing || !confirm(`Delete ${state.editing.name}?`)) return; await store.deleteLead(state.editing.id); closeLead(); toast('Lead deleted'); load(); });
-    $('#note-form').addEventListener('submit', async (e) => { e.preventDefault(); await store.addNote({ lead_id: state.editing.id, kind: $('#note-kind').value, body: $('#note-body').value.trim() }); $('#note-body').value = ''; renderNotes(); });
+    $('#note-form').addEventListener('submit', async (e) => { e.preventDefault(); const k = $('#note-kind').value; await store.addNote({ lead_id: state.editing.id, kind: k, body: $('#note-body').value.trim() }); $('#note-body').value = ''; if (k !== 'note') await markContacted(state.editing); renderNotes(); });
     $('#lead-task-form').addEventListener('submit', async (e) => { e.preventDefault(); const due = $('#lead-task-due').value; await store.addTask({ lead_id: state.editing.id, title: $('#lead-task-title').value.trim(), due_at: due ? new Date(due).toISOString() : null }); e.target.reset(); toast('Reminder added'); load(); });
 
     $('#task-form').addEventListener('submit', async (e) => { e.preventDefault(); const due = $('#task-due').value; await store.addTask({ lead_id: null, title: $('#task-title').value.trim(), due_at: due ? new Date(due).toISOString() : null }); e.target.reset(); load(); });
@@ -414,7 +426,7 @@
       <div class="drawer-actions">${c.lead_id ? '<button class="btn btn-ghost btn-sm" id="t-lead">Open lead</button>' : ''}<button class="btn btn-ghost btn-sm" id="t-toggle">${c.status === 'ai' ? 'Take over' : 'Let Monk AI reply'}</button></div></div>
       ${Object.keys(c.answers || {}).length ? `<div class="answers">${Object.entries(c.answers).map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('')}</div>` : ''}
       <div class="bubbles" id="bubbles">${(c.messages || []).map((m) => `<div class="bub ${m.from}">${who[m.from] ? `<i>${who[m.from]}</i>` : ''}${esc(m.body)}<span>${fmtDT(m.at)}</span></div>`).join('')}</div>
-      <form id="reply-form" class="sim-form"><input id="reply-input" placeholder="Reply on WhatsApp…" autocomplete="off" required><button class="btn btn-sm">Send</button></form>`;
+       <form id="reply-form" class="sim-form"><select id="reply-qr" class="qr-pick" title="Quick reply"><option value="">⚡</option>${quickReplies().map((q, i) => `<option value="${i}">${esc(q.title)}</option>`).join('')}</select><input id="reply-input" placeholder="Reply on WhatsApp…" autocomplete="off" required><button class="btn btn-sm">Send</button></form>`;
     const b = $('#bubbles'); b.scrollTop = b.scrollHeight;
   }
 
@@ -717,6 +729,132 @@
     toast(`Imported ${added} leads`); load();
   }
 
+  /* ---------- Part 7: sales desk ---------- */
+  const DEFAULT_QR = [
+    { title: 'Thanks + next step', body: 'Hi {name}, thanks for your enquiry with {business}! I will share the details shortly.' },
+    { title: 'Call slot', body: 'Hi {name}, can we speak for 10 minutes? Pick any slot here: {booking_link}' },
+    { title: 'Following up', body: 'Hi {name}, just following up on our conversation. Any questions I can answer?' },
+  ];
+  const quickReplies = () => state.integ?.quick_replies || window.MMPresets?.byId[state.agent?.industry]?.quick_replies || DEFAULT_QR;
+  async function saveInteg(patch) { state.integ = { ...(state.integ || {}), ...patch }; await store.saveIntegrations(state.integ); }
+  const isContacted = (l) => (l.tags || []).includes('contacted');
+  const contactedPatch = (l) => (isContacted(l) ? {} : { tags: [...(l.tags || []), 'contacted'] });
+  async function markContacted(l) { if (!l || isContacted(l)) return; l.tags = [...(l.tags || []), 'contacted']; await store.saveLead({ id: l.id, tags: l.tags }); checkSLA(); }
+  async function autoAssign() {
+    const ig = state.integ || {}; const reps = ig.reps || []; if (!ig.round_robin || !reps.length) return;
+    let i = ig.rr_next || 0; const todo = state.leads.filter((l) => !l.assigned_to && !/won|lost/i.test(stageName(l.stage_id))).sort((a, b) => a.created_at.localeCompare(b.created_at));
+    if (!todo.length) return;
+    for (const l of todo) { l.assigned_to = reps[i % reps.length]; i++; await store.saveLead({ id: l.id, assigned_to: l.assigned_to }); }
+    await saveInteg({ rr_next: i % reps.length }); toast(`Assigned ${todo.length} new lead${todo.length > 1 ? 's' : ''}`);
+  }
+  const slaLate = () => { const m = (state.integ?.sla_minutes || 15) * 6e4; return state.leads.filter((l) => l.score === 'hot' && !isContacted(l) && !/won|lost/i.test(stageName(l.stage_id)) && Date.now() - new Date(l.created_at) > m); };
+  const notified = new Set();
+  function checkSLA() {
+    const late = slaLate(), bar = $('#sla-bar'); bar.classList.toggle('hidden', !late.length);
+    if (!late.length) return;
+    const mins = (l) => Math.round((Date.now() - new Date(l.created_at)) / 6e4);
+    bar.innerHTML = `⚠️ <b>${late.length} hot lead${late.length > 1 ? 's' : ''}</b> waiting over ${state.integ?.sla_minutes || 15} min: ${late.slice(0, 4).map((l) => `<button class="chip" data-lead="${l.id}">${esc(first(l.name))} · ${dur((Date.now() - new Date(l.created_at)))}${l.assigned_to ? ' · ' + esc(l.assigned_to) : ''}</button>`).join('')}${late.length > 4 ? ` +${late.length - 4} more` : ''}`;
+    if ('Notification' in window && Notification.permission === 'granted') for (const l of late) if (!notified.has(l.id)) { notified.add(l.id); try { new Notification('Hot lead waiting', { body: `${l.name} has waited ${mins(l)} min. Call now.`, icon: '../assets/logo-mark.svg' }); } catch {} }
+  }
+  setInterval(() => { if (store) checkSLA(); }, 60e3);
+
+  // Quotes
+  const qTotals = (q) => { const sub = (q.items || []).reduce((a, it) => a + (+it.qty || 0) * (+it.rate || 0), 0); const tax = sub * (+q.gst || 0) / 100; return { sub, tax, total: Math.round((sub + tax) * 100) / 100 }; };
+  const nextQuoteNo = () => { const y = new Date().getFullYear(); const n = state.quotes.filter((q) => String(q.number).startsWith(`Q-${y}-`)).length + 1; return `Q-${y}-${String(n).padStart(3, '0')}`; };
+  const QSTAT = { draft: 'Draft', sent: 'Sent', accepted: '✓ Won', rejected: 'Lost' };
+  const qiRow = (it = { desc: '', qty: 1, unit: 'pcs', rate: 0 }) => `<tr class="qi-row"><td><input class="qi-desc" value="${esc(it.desc)}" placeholder="PTFE sheet 3 mm, virgin"></td><td><input class="qi-qty" type="number" min="0" step="any" value="${esc(it.qty)}"></td><td><input class="qi-unit" value="${esc(it.unit)}"></td><td><input class="qi-rate" type="number" min="0" step="any" value="${esc(it.rate)}"></td><td class="qi-amt"></td><td><button type="button" class="x">×</button></td></tr>`;
+  function readQuote() {
+    const f = $('#quote-form'); const old = state.quotes.find((x) => x.id === f.dataset.id) || {};
+    return { ...old, lead_id: f.elements.lead_id.value || null, number: f.elements.number.value.trim(), gst: +f.elements.gst.value, valid_days: +f.elements.valid_days.value || 15, terms: f.elements.terms.value.trim(), status: old.status || 'draft',
+      items: $$('.qi-row').map((r) => ({ desc: r.querySelector('.qi-desc').value.trim(), qty: +r.querySelector('.qi-qty').value || 0, unit: r.querySelector('.qi-unit').value.trim(), rate: +r.querySelector('.qi-rate').value || 0 })).filter((it) => it.desc) };
+  }
+  function updateQTotals() {
+    $$('.qi-row').forEach((r) => { r.querySelector('.qi-amt').textContent = inr((+r.querySelector('.qi-qty').value || 0) * (+r.querySelector('.qi-rate').value || 0)); });
+    const t = qTotals(readQuote()); $('#q-totals').innerHTML = `<span>Subtotal <b>${inr(t.sub)}</b></span><span>GST <b>${inr(t.tax)}</b></span><span class="big">Total <b>${inr(t.total)}</b></span>`;
+  }
+  function fillQuote(q, leadId) {
+    const f = $('#quote-form'); f.dataset.id = q?.id || '';
+    $('#quote-lead').innerHTML = '<option value="">Choose a lead…</option>' + state.leads.map((l) => `<option value="${l.id}">${esc(l.name)}</option>`).join('');
+    f.elements.lead_id.value = q?.lead_id || leadId || ''; f.elements.number.value = q?.number || nextQuoteNo();
+    f.elements.gst.value = String(q?.gst ?? 18); f.elements.valid_days.value = q?.valid_days || 15;
+    f.elements.terms.value = q?.terms ?? (state.integ?.quote_terms || 'Prices ex-works. Freight extra at actuals.\nPayment: 50% advance, balance before dispatch.\nDelivery: 7–10 working days from PO.');
+    const lead = leadById(f.elements.lead_id.value);
+    $('#qi-body').innerHTML = (q?.items?.length ? q.items : [{ desc: lead?.interest || '', qty: parseFloat(lead?.budget) || 1, unit: /kg/i.test(lead?.budget || '') ? 'kg' : 'pcs', rate: 0 }]).map(qiRow).join('');
+    $('#quote-title').textContent = q ? q.number : 'New quote'; const st = $('#quote-status'); st.textContent = q ? QSTAT[q.status] : ''; st.classList.toggle('hidden', !q);
+    updateQTotals();
+  }
+  function renderQuotes() {
+    const qs = state.quotes; const sum = (st) => qs.filter((q) => st.includes(q.status)).reduce((a, q) => a + Number(q.total || 0), 0);
+    $('#q-stats').innerHTML = `<span>Open <b>${inr(sum(['draft', 'sent']))}</b></span><span>Won <b>${inr(sum(['accepted']))}</b></span><span>Win rate <b>${pct(qs.filter((q) => q.status === 'accepted').length, qs.filter((q) => q.status !== 'draft').length)}</b></span>`;
+    $('#quote-list').innerHTML = qs.map((q) => `<li><button class="seq ${q.id === state.activeQuote ? 'active' : ''}" data-id="${q.id}"><b>${esc(q.number)} · ${esc(leadById(q.lead_id)?.name || 'No lead')}</b><span class="small muted">${inr(q.total)} · ${QSTAT[q.status]} · ${fmtDate(q.created_at)}</span></button></li>`).join('') || '<li class="empty small">No quotes yet. Make one from any lead.</li>';
+    if (!$('#quote-form').dataset.ready || state.quoteDirty) { fillQuote(state.quotes.find((q) => q.id === state.activeQuote), state.quoteLead); $('#quote-form').dataset.ready = 1; state.quoteDirty = false; state.quoteLead = null; }
+    const lh = state.integ?.letterhead || {}; const lf = $('#letterhead-form');
+    ['company', 'gstin', 'phone', 'email', 'address', 'bank'].forEach((k) => { lf.elements[k].value = lh[k] ?? (k === 'company' ? state.agent?.business_name || '' : ''); });
+  }
+  async function persistQuote(patch = {}) {
+    const q = { ...readQuote(), ...patch }; if (!q.lead_id) { toast('Choose a lead first'); return null; } if (!q.items.length) { toast('Add at least one item'); return null; }
+    q.total = qTotals(q).total; const saved = await store.saveQuote(q); state.activeQuote = saved.id; state.quoteDirty = true; return saved;
+  }
+  function quoteHTML(q) {
+    const lh = state.integ?.letterhead || {}; const lead = leadById(q.lead_id) || {}; const t = qTotals(q); const d = new Date(q.created_at || Date.now());
+    const valid = new Date(+d + q.valid_days * 864e5).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(q.number)} – ${esc(lead.name || '')}</title><style>
+      body{font:14px/1.5 Inter,Arial,sans-serif;color:#0F172A;max-width:780px;margin:32px auto;padding:0 24px}h1{font-size:22px;color:#1E1B4B;margin:0}.top{display:flex;justify-content:space-between;border-bottom:3px solid #F28C28;padding-bottom:14px;margin-bottom:18px}
+      table{width:100%;border-collapse:collapse;margin:16px 0}th{background:#1E1B4B;color:#fff;text-align:left;padding:8px}td{padding:8px;border-bottom:1px solid #E2E8F0}td.n,th.n{text-align:right}.tot{margin-left:auto;width:280px}.tot div{display:flex;justify-content:space-between;padding:4px 0}.tot .g{font-size:18px;font-weight:700;color:#1E1B4B;border-top:2px solid #1E1B4B;margin-top:4px;padding-top:8px}
+      .muted{color:#64748B;font-size:12px}pre{font:inherit;white-space:pre-wrap;background:#FFF7ED;padding:12px;border-radius:8px}@media print{body{margin:0}}</style></head><body>
+      <div class="top"><div><h1>${esc(lh.company || state.agent?.business_name || '')}</h1><div class="muted">${esc(lh.address || '')}<br>${[lh.phone, lh.email].filter(Boolean).map(esc).join(' · ')}${lh.gstin ? '<br>GSTIN ' + esc(lh.gstin) : ''}</div></div>
+      <div style="text-align:right"><h1>QUOTATION</h1><div>${esc(q.number)}</div><div class="muted">Date ${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}<br>Valid till ${valid}</div></div></div>
+      <div><span class="muted">To</span><br><b>${esc(lead.name || '')}</b><br>${esc(lead.phone || '')} ${esc(lead.email || '')}</div>
+      <table><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Amount</th></tr>${q.items.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.desc)}</td><td class="n">${esc(it.qty)} ${esc(it.unit)}</td><td class="n">${inr(it.rate)}</td><td class="n">${inr(it.qty * it.rate)}</td></tr>`).join('')}</table>
+      <div class="tot"><div><span>Subtotal</span><span>${inr(t.sub)}</span></div><div><span>GST ${q.gst}%</span><span>${inr(t.tax)}</span></div><div class="g"><span>Total</span><span>${inr(t.total)}</span></div></div>
+      ${q.terms ? `<h3>Terms</h3><pre>${esc(q.terms)}</pre>` : ''}${lh.bank ? `<p class="muted">Bank: ${esc(lh.bank)}</p>` : ''}<p class="muted">Thank you for your enquiry.</p><script>onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`;
+  }
+  async function moveLead(lead, re, extra = {}) { const st = state.stages.find((s) => re.test(s.name)); await store.saveLead({ id: lead.id, ...(st ? { stage_id: st.id } : {}), ...contactedPatch(lead), ...extra }); }
+  function bindP7() {
+    $('#sla-bar').addEventListener('click', (e) => { const b = e.target.closest('[data-lead]'); if (b) openLead(b.dataset.lead); });
+    $('#mark-contacted').addEventListener('click', async () => { await markContacted(state.editing); await store.addNote({ lead_id: state.editing.id, kind: 'call', body: 'Marked as contacted' }); toast('Marked as contacted'); $('#mark-contacted').classList.add('hidden'); renderNotes(); load(); });
+    $('#lead-quote').addEventListener('click', () => { state.activeQuote = null; state.quoteLead = state.editing.id; state.quoteDirty = true; closeLead(); state.view = 'quotes'; location.hash = 'quotes'; render(); });
+    $('#lead-qr-send').addEventListener('click', async () => {
+      const l = state.editing; const q = quickReplies()[+$('#lead-qr').value]; const digits = (l?.phone || '').replace(/\D/g, ''); if (!q) return; if (!digits) return toast('This lead has no phone number');
+      const msg = personalise(q.body, l); window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
+      await store.addNote({ lead_id: l.id, kind: 'whatsapp', body: 'Sent: ' + msg }); await markContacted(l); renderNotes();
+    });
+    $('#thread').addEventListener('change', (e) => { if (e.target.id !== 'reply-qr' || e.target.value === '') return; const c = state.convs.find((x) => x.id === state.activeConv); const q = quickReplies()[+e.target.value]; $('#reply-input').value = personalise(q.body, leadById(c?.lead_id) || { name: c?.name }); e.target.value = ''; $('#reply-input').focus(); });
+    $('#team-form').addEventListener('submit', async (e) => { e.preventDefault(); const f = e.target; await saveInteg({ reps: f.elements.reps.value.split(',').map((x) => x.trim()).filter(Boolean), round_robin: f.elements.round_robin.checked, sla_minutes: Math.max(1, +f.elements.sla.value || 15) }); toast('Team saved'); load(); });
+    $('#notif-btn').addEventListener('click', async () => { const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Desktop alerts on' : 'Alerts blocked in this browser'); renderSettings(); });
+    $('#qr-form').addEventListener('submit', async (e) => { e.preventDefault(); await saveInteg({ quick_replies: [...quickReplies(), { title: $('#qr-title').value.trim(), body: $('#qr-body').value.trim() }] }); e.target.reset(); toast('Quick reply added'); renderSettings(); });
+    $('#qr-list').addEventListener('click', async (e) => { if (!e.target.matches('.del')) return; const i = +e.target.closest('li').dataset.i; await saveInteg({ quick_replies: quickReplies().filter((_, j) => j !== i) }); renderSettings(); });
+    $('#new-quote').addEventListener('click', () => { state.activeQuote = null; fillQuote(null); renderQuotes(); });
+    $('#quote-list').addEventListener('click', (e) => { const b = e.target.closest('.seq'); if (b) { state.activeQuote = b.dataset.id; state.quoteDirty = true; renderQuotes(); } });
+    $('#add-qi').addEventListener('click', () => { $('#qi-body').insertAdjacentHTML('beforeend', qiRow()); updateQTotals(); });
+    $('#qi-body').addEventListener('click', (e) => { if (e.target.matches('.x') && $$('.qi-row').length > 1) { e.target.closest('tr').remove(); updateQTotals(); } });
+    $('#quote-form').addEventListener('input', updateQTotals);
+    $('#quote-form').addEventListener('change', (e) => { if (e.target.id === 'quote-lead' && !$('#quote-form').dataset.id) { const l = leadById(e.target.value); const r = $('.qi-row .qi-desc'); if (l && r && !r.value) r.value = l.interest || ''; } });
+    $('#quote-form').addEventListener('submit', async (e) => { e.preventDefault(); try { if (await persistQuote()) { toast('Quote saved'); load(); } } catch (err) { toast(/quotes/.test(err.message) ? 'Run the Part 7 SQL in Supabase first (schema.sql)' : err.message); } });
+    $('#quote-form').addEventListener('click', async (e) => {
+      const act = e.target.closest('[data-q]')?.dataset.q; if (!act) return;
+      if (act === 'pdf') { const w = window.open('', '_blank'); const q = await persistQuote(); if (!q) { w?.close(); return; } if (w) { w.document.write(quoteHTML(q)); w.document.close(); } load(); return; }
+      try {
+        if (act === 'wa') {
+          const draft = readQuote(); const l = leadById(draft.lead_id); const digits = (l?.phone || '').replace(/\D/g, ''); if (!digits) return toast('This lead has no phone number');
+          const w = window.open('', '_blank'); const q = await persistQuote({ status: 'sent' }); if (!q) { w?.close(); return; }
+          const t = qTotals(q); const msg = `Hi ${first(l.name)}, here is our quotation ${q.number}:\n${q.items.map((it) => `• ${it.desc}: ${it.qty} ${it.unit} × ${inr(it.rate)}`).join('\n')}\nTotal ${inr(t.total)} incl. ${q.gst}% GST, valid ${q.valid_days} days.\nThe PDF follows. Reply here with any changes.\n– ${state.agent?.business_name || ''}`;
+          if (w) w.location = `https://wa.me/${digits}?text=${encodeURIComponent(msg)}`;
+          await store.addNote({ lead_id: l.id, kind: 'whatsapp', body: `Quotation ${q.number} sent (${inr(t.total)})` });
+          await moveLead(l, /quot/i, { value: t.total });
+          const fu = state.seqs.find((s) => /quot/i.test(s.name)); if (fu && !state.enrolls.some((x) => x.lead_id === l.id && x.sequence_id === fu.id && x.status === 'active')) await startSequence(l.id, fu.id);
+          toast('Quote sent. Follow-ups started');
+        } else {
+          const q = await persistQuote({ status: act }); if (!q) return; const l = leadById(q.lead_id);
+          if (l) { await moveLead(l, act === 'accepted' ? /won/i : /lost/i, act === 'accepted' ? { value: q.total } : {}); await store.addNote({ lead_id: l.id, kind: 'note', body: `Quotation ${q.number} ${act === 'accepted' ? 'accepted 🎉' : 'lost'}` }); await Promise.all(state.enrolls.filter((x) => x.lead_id === l.id && x.status === 'active').map((x) => store.updateEnrollment(x.id, { status: 'stopped' }))); }
+          toast(act === 'accepted' ? 'Won! Deal value updated' : 'Marked lost');
+        }
+        load();
+      } catch (err) { toast(err.message); }
+    });
+    $('#letterhead-form').addEventListener('submit', async (e) => { e.preventDefault(); const f = e.target; await saveInteg({ letterhead: Object.fromEntries(['company', 'gstin', 'phone', 'email', 'address', 'bank'].map((k) => [k, f.elements[k].value.trim()])) }); toast('Letterhead saved'); });
+  }
+
   /* ---------- Integrations ---------- */
   const conn = () => JSON.parse(localStorage.getItem('mm_supabase') || '{}');
   const handle = () => state.avail?.slug || '';
@@ -814,7 +952,7 @@
     const rc = $('#reset-conn');
     rc.addEventListener('click', (e) => { e.preventDefault(); localStorage.removeItem('mm_supabase'); location.reload(); });
     try {
-      bind(); bindAuth(); bindAI(); bindP4(); bindP5();
+      bind(); bindAuth(); bindAI(); bindP4(); bindP5(); bindP7();
       if (bootIssue) return showAuth(bootIssue);
       if (cloud) {
         let sess = null;

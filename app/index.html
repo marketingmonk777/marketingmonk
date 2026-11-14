@@ -7,7 +7,7 @@
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css?v=6">
+<link rel="stylesheet" href="app.css?v=7">
 </head>
 <body>
 <!-- Auth screen -->
@@ -39,6 +39,7 @@
       <a href="#inbox" data-view="inbox">💬 Inbox <span id="inbox-count" class="count hidden"></span></a>
       <a href="#leads" data-view="leads">👥 Leads</a>
       <a href="#followups" data-view="followups">🔁 Follow-ups <span id="due-count" class="count hidden"></span></a>
+      <a href="#quotes" data-view="quotes">📄 Quotes</a>
       <a href="#bookings" data-view="bookings">📅 Bookings</a>
       <a href="#tasks" data-view="tasks">✅ Tasks</a>
       <a href="#dashboard" data-view="dashboard">📊 Insights</a>
@@ -54,6 +55,7 @@
   </aside>
 
   <main class="main">
+    <div id="sla-bar" class="sla-bar hidden"></div>
     <header class="top">
       <h2 id="view-title">Pipeline</h2>
       <div class="top-actions">
@@ -158,6 +160,48 @@
         <div class="panel wide"><h3>Team</h3><table class="mini" id="team"></table></div>
       </div>
     </section>
+    <section id="view-quotes" class="view hidden">
+      <div class="seq-grid">
+        <div class="panel">
+          <div class="panel-head"><h3>Quotations</h3><button class="btn btn-sm" id="new-quote">+ New quote</button></div>
+          <div class="q-stats" id="q-stats"></div>
+          <ul id="quote-list" class="seq-list"></ul>
+        </div>
+        <div class="panel">
+          <form id="quote-form">
+            <div class="panel-head"><h3 id="quote-title">New quote</h3><span id="quote-status" class="pill"></span></div>
+            <div class="grid2">
+              <label>Customer<select name="lead_id" id="quote-lead" required></select></label>
+              <label>Quote no.<input name="number" required></label>
+              <label>GST %<select name="gst"><option>0</option><option>5</option><option>12</option><option selected>18</option><option>28</option></select></label>
+              <label>Valid for (days)<input name="valid_days" type="number" min="1" value="15"></label>
+            </div>
+            <table class="qi"><thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Rate (₹)</th><th>Amount</th><th></th></tr></thead><tbody id="qi-body"></tbody></table>
+            <button type="button" class="link" id="add-qi">+ Add item</button>
+            <div class="q-totals" id="q-totals"></div>
+            <label class="full">Terms<textarea name="terms" rows="3"></textarea></label>
+            <div class="drawer-actions">
+              <button class="btn btn-sm" type="submit">Save draft</button>
+              <button class="btn btn-ghost btn-sm" type="button" data-q="pdf">🖨️ PDF</button>
+              <button class="btn btn-ghost btn-sm" type="button" data-q="wa">💬 Send on WhatsApp</button>
+              <button class="btn btn-ghost btn-sm" type="button" data-q="accepted">✓ Won</button>
+              <button class="btn btn-danger btn-sm" type="button" data-q="rejected">Lost</button>
+            </div>
+            <p class="small muted">Sending moves the lead to your quotation stage and starts the "Quotation follow-up" sequence. Won sets the deal value and moves it to Won.</p>
+          </form>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Letterhead</h3>
+        <form id="letterhead-form" class="grid2">
+          <label>Company name<input name="company"></label><label>GSTIN<input name="gstin"></label>
+          <label>Phone<input name="phone"></label><label>Email<input name="email" type="email"></label>
+          <label class="full">Address<input name="address"></label>
+          <label class="full">Bank details (printed on the quote)<input name="bank" placeholder="A/c no, IFSC, bank"></label>
+          <div><button class="btn btn-sm">Save letterhead</button></div>
+        </form>
+      </div>
+    </section>
     <section id="view-integrations" class="view hidden">
       <div class="int-grid">
         <div class="panel int"><div class="int-h"><span class="ico">🌐</span><div><h3>Website lead form</h3><p class="muted small">Paste on any website. Leads land in New, scored and ready for follow-up.</p></div></div>
@@ -182,6 +226,22 @@
         <h3>Industry preset</h3>
         <p class="muted small">Set up the pipeline, Monk AI questions, follow-ups and booking page for your trade in one click. Your leads stay as they are, and you can edit everything afterwards.</p>
         <div id="preset-list" class="preset-list"></div>
+      </div>
+      <div class="panel">
+        <h3>Sales team &amp; hot-lead alerts</h3>
+        <p class="muted small">New unassigned leads are shared out in turn. If a hot lead isn't contacted in time, you get an alert.</p>
+        <form id="team-form" class="grid2">
+          <label class="full">Reps (comma separated)<input name="reps" placeholder="Priya, Rahul"></label>
+          <label class="check"><input type="checkbox" name="round_robin"> Auto-assign new leads (round-robin)</label>
+          <label>Alert if a hot lead waits (minutes)<input name="sla" type="number" min="1" value="15"></label>
+          <div><button class="btn btn-sm">Save</button> <button type="button" class="btn btn-ghost btn-sm" id="notif-btn">Enable desktop alerts</button></div>
+        </form>
+      </div>
+      <div class="panel">
+        <h3>Quick replies</h3>
+        <p class="muted small">Saved messages for the inbox and the lead drawer. Use {name}, {business} and {booking_link}.</p>
+        <ul id="qr-list" class="stage-list"></ul>
+        <form id="qr-form" class="row-form"><input id="qr-title" placeholder="Title (Price list)" required><input id="qr-body" placeholder="Message" required><button class="btn btn-sm">Add</button></form>
       </div>
       <div class="panel">
         <h3>Pipeline stages</h3>
@@ -223,6 +283,8 @@
     <div class="drawer-actions">
       <button class="btn btn-sm" type="submit">Save lead</button>
       <a class="btn btn-ghost btn-sm hidden" id="wa-link" target="_blank" rel="noopener">WhatsApp</a>
+      <button class="btn btn-ghost btn-sm hidden" type="button" id="mark-contacted">📞 Contacted</button>
+      <button class="btn btn-ghost btn-sm hidden" type="button" id="lead-quote">📄 Quote</button>
       <button class="btn btn-danger btn-sm hidden" type="button" id="delete-lead">Delete</button>
     </div>
   </form>
@@ -230,6 +292,8 @@
     <h4>Activity</h4>
     <form id="note-form" class="row-form"><select id="note-kind"><option value="note">📝 Note</option><option value="call">📞 Call</option><option value="whatsapp">💬 WhatsApp</option><option value="email">✉️ Email</option></select><input id="note-body" placeholder="What happened?" required><button class="btn btn-sm">Log</button></form>
     <ul id="note-list" class="note-list"></ul>
+    <h4>Quick reply on WhatsApp</h4>
+    <div class="row-form"><select id="lead-qr"></select><button type="button" class="btn btn-sm" id="lead-qr-send">Open in WhatsApp</button></div>
     <h4>Follow-up sequence</h4>
     <div id="lead-seq"></div>
     <h4>Follow-up reminder</h4>
@@ -251,7 +315,7 @@
 <div id="toast" class="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script type="module" src="../supabase/functions/_shared/monk-engine.js"></script>
-<script src="presets.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="presets.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

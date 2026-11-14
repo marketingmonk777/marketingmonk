@@ -74,3 +74,10 @@ Settings → Industry preset sets up the CRM for a trade in one click: pipeline 
 - **Real estate agent**: coming next.
 
 After pulling this update, redeploy `whatsapp-webhook` so live WhatsApp chats use the same mapping.
+
+## Sales desk (Part 7)
+
+- **Quotes**: GST quotation builder with line items, letterhead and terms. One click prints a branded PDF, sends a summary on WhatsApp, moves the lead to the quotation stage, and starts the "Quotation follow-up" sequence. Marking it Won or Lost updates the deal value and stage and stops follow-ups. Cloud mode: re-run `supabase/schema.sql` to create the `quotes` table.
+- **Hot-lead alerts**: a red bar (plus optional desktop notifications) when a hot lead has not been contacted within your time limit, which defaults to 15 minutes. A lead counts as contacted once you log a call or WhatsApp, move its stage, or send a quick reply.
+- **Round-robin**: list your reps in Settings, and new unassigned leads are shared out in turn.
+- **Quick replies**: saved messages with {name}/{business}/{booking_link}, used in the inbox and in the lead drawer (opens WhatsApp). The PTFE preset includes its own set.
