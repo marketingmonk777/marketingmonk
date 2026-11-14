@@ -7,7 +7,7 @@
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css?v=5.1">
+<link rel="stylesheet" href="app.css?v=6">
 </head>
 <body>
 <!-- Auth screen -->
@@ -179,6 +179,11 @@
     </section>
     <section id="view-settings" class="view hidden">
       <div class="panel">
+        <h3>Industry preset</h3>
+        <p class="muted small">Set up the pipeline, Monk AI questions, follow-ups and booking page for your trade in one click. Your leads stay as they are, and you can edit everything afterwards.</p>
+        <div id="preset-list" class="preset-list"></div>
+      </div>
+      <div class="panel">
         <h3>Pipeline stages</h3>
         <p class="muted small">Rename, reorder or add stages to match how you sell.</p>
         <ul id="stage-list" class="stage-list"></ul>
@@ -205,7 +210,7 @@
       <label>Name<input name="name" required></label>
       <label>Phone<input name="phone" placeholder="+91…"></label>
       <label>Email<input name="email" type="email"></label>
-      <label>Source<select name="source"><option>Meta ads</option><option>Google ads</option><option>Website</option><option>WhatsApp</option><option>Referral</option><option>Walk-in</option></select></label>
+      <label>Source<select name="source"><option>Meta ads</option><option>Google ads</option><option>Website</option><option>WhatsApp</option><option>Referral</option><option>Walk-in</option><option>IndiaMART</option><option>TradeIndia</option><option>Exhibition</option><option>Email</option></select></label>
       <label>Score<select name="score"><option value="hot">🔥 Hot</option><option value="warm" selected>🌤️ Warm</option><option value="cold">❄️ Cold</option></select></label>
       <label>Stage<select name="stage_id" id="stage-select"></select></label>
       <label>Interest<input name="interest" placeholder="2BHK, trial class…"></label>
@@ -246,6 +251,7 @@
 <div id="toast" class="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script type="module" src="../supabase/functions/_shared/monk-engine.js"></script>
-<script src="app.js?v=5.1"></script>
+<script src="presets.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

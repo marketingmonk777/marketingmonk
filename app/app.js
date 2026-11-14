@@ -256,6 +256,41 @@
   function renderSettings() {
     $('#stage-list').innerHTML = state.stages.map((s, i) => `<li data-id="${s.id}"><input value="${esc(s.name)}" aria-label="Stage name"><button class="link up" ${i === 0 ? 'disabled' : ''}>↑</button><button class="link down" ${i === state.stages.length - 1 ? 'disabled' : ''}>↓</button><button class="x del" title="Delete stage">×</button></li>`).join('');
     $('#reset-demo').closest('.panel').classList.toggle('hidden', store.mode !== 'demo');
+    const cur = state.agent?.industry;
+    $('#preset-list').innerHTML = (window.MMPresets?.list || []).map((p) => `<div class="preset ${cur === p.id ? 'on' : ''}"><span class="preset-icon">${p.icon}</span><div><b>${esc(p.name)}</b>${cur === p.id ? ' <span class="pill">Active</span>' : ''}<p class="small muted">${esc(p.blurb)}</p></div>${p.soon ? '<button class="btn btn-ghost btn-sm" disabled>Coming soon</button>' : `<button class="btn btn-sm" data-preset="${p.id}">${cur === p.id ? 'Re-apply' : 'Apply'}</button>`}</div>`).join('');
+  }
+
+  /* ---------- Industry presets ---------- */
+  const LABEL_DEFAULTS = {};
+  function applyLabels() {
+    const p = window.MMPresets?.byId[state.agent?.industry]; const f = $('#lead-form');
+    ['interest', 'budget', 'timeline', 'value'].forEach((k) => {
+      const input = f.elements[k]; if (!input) return; const lab = input.closest('label'); const txt = lab.firstChild;
+      LABEL_DEFAULTS[k] ||= [txt.nodeValue, input.placeholder];
+      const v = p?.labels?.[k]; const [t, ph] = Array.isArray(v) ? v : v ? [v, LABEL_DEFAULTS[k][1]] : LABEL_DEFAULTS[k];
+      txt.nodeValue = t; input.placeholder = ph || '';
+    });
+  }
+  async function applyPreset(p) {
+    const cur = [...state.stages];
+    for (let i = 0; i < p.stages.length; i++) { if (cur[i]) await store.updateStage(cur[i].id, { name: p.stages[i], position: i }); else await store.addStage(p.stages[i]); }
+    for (let j = p.stages.length; j < cur.length; j++) {
+      if (state.leads.some((l) => l.stage_id === cur[j].id)) await store.updateStage(cur[j].id, { position: j }); else await store.deleteStage(cur[j].id);
+    }
+    const prev = state.agent || window.MonkEngine.DEFAULT_AGENT;
+    await store.saveAgentConfig({ ...window.MonkEngine.DEFAULT_AGENT, ...prev, ...p.agent, business_name: prev.business_name || '', rep_name: prev.rep_name || '', industry: p.id });
+    const have = new Set(state.seqs.map((q) => q.name.toLowerCase()));
+    for (const q of p.sequences) if (!have.has(q.name.toLowerCase())) await store.saveSequence({ name: q.name, stop_on_reply: q.stop_on_reply, steps: q.steps.map((x) => ({ ...x })) });
+    if (state.avail) await store.saveAvailability({ ...state.avail, ...p.booking });
+    if (store.mode === 'demo') for (const l of state.leads) if (/^\+9198000000\d{2}$/.test(l.phone || '') && !(l.tags || []).length) await store.deleteLead(l.id); // swap generic demo leads for trade samples
+    if (store.mode === 'demo' && p.samples && !state.leads.some((l) => (l.tags || []).includes(p.id + '-sample'))) {
+      const st = await store.stages(); const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+      for (const [i, [name, phone, source, score, si, interest, budget, timeline, value]] of p.samples.entries()) {
+        const lead = await store.saveLead({ name, phone, email: '', source, score, stage_id: st[si]?.id || null, interest, budget, timeline, assigned_to: score === 'hot' ? 'Priya' : '', value, tags: [p.id + '-sample'] });
+        await store.saveLead({ id: lead.id, created_at: ago(2 + i * 9) });
+      }
+    }
+    sim.started = false; await load(); applyLabels();
   }
 
   /* ---------- Drawer ---------- */
@@ -264,7 +299,7 @@
     const l = id ? state.leads.find((x) => x.id === id) : null;
     state.editing = l;
     const f = $('#lead-form');
-    f.reset();
+    f.reset(); applyLabels();
     fillStageSelect(l?.stage_id || state.stages[0]?.id);
     if (l) for (const [k, v] of Object.entries(l)) if (f.elements[k] && k !== 'stage_id') f.elements[k].value = Array.isArray(v) ? v.join(', ') : v ?? '';
     $('#drawer-title').textContent = l ? l.name : 'New lead';
@@ -336,6 +371,12 @@
       const a = state.stages[i], b = state.stages[j];
       await Promise.all([store.updateStage(a.id, { position: j }), store.updateStage(b.id, { position: i })]); load();
     });
+    $('#preset-list').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-preset]'); if (!b) return; const p = window.MMPresets.byId[b.dataset.preset];
+      if (!confirm(`Apply the ${p.name} preset?\n\nThis renames your pipeline stages, replaces the Monk AI questions and adds ${p.name} follow-up sequences. Your leads are kept.`)) return;
+      b.disabled = true; b.textContent = 'Applying…';
+      try { await applyPreset(p); toast(`${p.name} preset applied`); } catch (err) { toast(err.message); load(); }
+    });
     $('#reset-demo').addEventListener('click', async () => { if (confirm('Reset all demo data?')) { store.reset(); load(); toast('Demo data reset'); } });
 
     $('#signout').addEventListener('click', async () => { await store.signOut(); location.hash = ''; location.reload(); });
@@ -402,11 +443,13 @@
     }
     if (r.done) {
       const ans = sim.conv.answers;
-      const qualified = state.stages.find((s) => /qualif/i.test(s.name)) || state.stages[0];
+      const qualified = state.stages.find((s) => /qualif|rfq/i.test(s.name)) || state.stages[0];
       const stage = r.score === 'hot' ? qualified : state.stages[0];
       const name = 'Test lead ' + new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
       try {
-        const lead = await store.saveLead({ name, phone: '', email: '', source: 'WhatsApp', score: r.score, stage_id: stage?.id || null, interest: ans.interest || '', budget: ans.budget || '', timeline: ans.timeline || '', assigned_to: r.score === 'hot' ? (state.agent?.rep_name || '') : '', value: 0, tags: ['monk-ai'] });
+        const lead = await store.saveLead({ name, phone: '', email: '', source: 'WhatsApp', score: r.score, stage_id: stage?.id || null, ...window.MonkEngine.leadFields(ans), assigned_to: r.score === 'hot' ? (state.agent?.rep_name || '') : '', value: 0, tags: ['monk-ai'] });
+        const summary = window.MonkEngine.answersSummary(ans, state.agent);
+        if (summary) await store.addNote({ lead_id: lead.id, kind: 'whatsapp', body: 'Monk AI collected:\n' + summary });
         await store.saveConversation({ lead_id: lead.id, name, phone: '', channel: 'simulator', status: sim.conv.status, score: r.score, step: sim.conv.step, answers: ans, unread: r.score === 'hot' ? 1 : 0, messages: sim.conv.messages });
         if (r.score === 'hot') await store.addTask({ lead_id: lead.id, title: `Call ${name} (hot lead from Monk AI)`, due_at: new Date(Date.now() + 15 * 6e4).toISOString() });
         $('#sim-note').innerHTML = `Lead created: <span class="score ${r.score}">${SCORE[r.score]}</span> in ${esc(stage?.name || 'pipeline')}. <a href="#" id="sim-restart">Test again</a>`;
@@ -445,7 +488,9 @@
     $('#agent-form').addEventListener('submit', async (e) => {
       e.preventDefault(); const f = e.target; const a = {};
       ['business_name', 'rep_name', 'about', 'greeting', 'hot_words', 'cold_words', 'handoff_hot', 'handoff_other'].forEach((k) => { a[k] = f.elements[k].value.trim(); });
-      a.questions = $$('.q-row').map((r) => ({ key: r.querySelector('.q-key').value.trim().toLowerCase().replace(/\s+/g, '_') || 'answer', question: r.querySelector('.q-text').value.trim() })).filter((q) => q.question);
+      const oldQ = Object.fromEntries((state.agent?.questions || []).map((q) => [q.key, q]));
+      a.questions = $$('.q-row').map((r) => { const key = r.querySelector('.q-key').value.trim().toLowerCase().replace(/\s+/g, '_') || 'answer'; return { key, question: r.querySelector('.q-text').value.trim(), ...(oldQ[key]?.label ? { label: oldQ[key].label } : {}) }; }).filter((q) => q.question);
+      if (state.agent?.industry) a.industry = state.agent.industry;
       try { await store.saveAgentConfig(a); state.agent = a; toast('Monk AI saved'); simReset(); } catch (err) { toast(err.message); }
     });
     $('#sim-form').addEventListener('submit', (e) => { e.preventDefault(); const v = $('#sim-input').value.trim(); if (!v || $('#sim-input').disabled) return; $('#sim-input').value = ''; simSend(v); });
@@ -648,9 +693,9 @@
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + toCSV([head, ...rows])], { type: 'text/csv' }));
     a.download = `marketingmonk-leads-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); toast(`Exported ${rows.length} leads`);
   }
-  const ALIASES = { name: ['name', 'full name', 'full_name', 'lead name', 'customer name', 'contact name'], first: ['first name', 'first_name', 'firstname'], last: ['last name', 'last_name', 'lastname'],
-    phone: ['phone', 'phone number', 'phone_number', 'mobile', 'mobile number', 'whatsapp', 'whatsapp number', 'contact number'], email: ['email', 'email address', 'e-mail'],
-    source: ['source', 'lead source', 'platform', 'campaign_name', 'campaign'], interest: ['interest', 'requirement', 'product', 'service', 'looking for'], budget: ['budget'], timeline: ['timeline', 'when'], assigned_to: ['assigned to', 'owner', 'rep'], value: ['value', 'deal value', 'amount'] };
+  const ALIASES = { name: ['name', 'full name', 'full_name', 'lead name', 'customer name', 'contact name', 'sender_name', 'sender name', 'buyer name'], first: ['first name', 'first_name', 'firstname'], last: ['last name', 'last_name', 'lastname'],
+    phone: ['phone', 'phone number', 'phone_number', 'mobile', 'mobile number', 'whatsapp', 'whatsapp number', 'contact number', 'sender_mobile', 'sender mobile', 'buyer mobile', 'mobile no'], email: ['email', 'email address', 'e-mail', 'sender_email', 'sender email', 'buyer email'],
+    source: ['source', 'lead source', 'platform', 'campaign_name', 'campaign'], interest: ['interest', 'requirement', 'product', 'service', 'looking for', 'query_product_name', 'product name', 'subject', 'query_message', 'enquiry', 'message'], company: ['company', 'company name', 'sender_company', 'sender company', 'buyer company'], quantity: ['quantity', 'qty', 'order quantity'], budget: ['budget'], timeline: ['timeline', 'when'], assigned_to: ['assigned to', 'owner', 'rep'], value: ['value', 'deal value', 'amount'] };
   async function importCSV(file) {
     const rows = parseCSV(await file.text()); if (rows.length < 2) return ($('#import-msg').textContent = 'That file has no rows to import.');
     const head = rows[0].map((h) => h.trim().toLowerCase().replace(/^\ufeff/, ''));
@@ -661,10 +706,11 @@
     let added = 0, dup = 0;
     for (const r of rows.slice(1)) {
       const g = (k) => (idx[k] >= 0 ? (r[idx[k]] || '').trim() : '');
-      const name = g('name') || [g('first'), g('last')].filter(Boolean).join(' ') || g('phone');
+      const person = g('name') || [g('first'), g('last')].filter(Boolean).join(' ') || g('phone');
+      const name = g('company') && person && !person.includes(g('company')) ? `${person} · ${g('company')}` : person || g('company');
       const phone = g('phone').replace(/^p:/, ''); const key = phone.replace(/\D/g, '').slice(-10);
       if (!name) continue; if (key && seen.has(key)) { dup++; continue; } if (key) seen.add(key);
-      await store.saveLead({ name, phone, email: g('email'), source: g('source') || 'CSV import', score: 'warm', stage_id: state.stages[0]?.id || null, interest: g('interest'), budget: g('budget'), timeline: g('timeline'), assigned_to: g('assigned_to'), value: Number(g('value').replace(/[^\d.]/g, '')) || 0, tags: ['imported'] });
+      await store.saveLead({ name, phone, email: g('email'), source: g('source') || (head.some((h) => h.startsWith('sender_') || h.startsWith('query_')) ? 'IndiaMART' : 'CSV import'), score: 'warm', stage_id: state.stages[0]?.id || null, interest: g('interest'), budget: g('budget') || g('quantity'), timeline: g('timeline'), assigned_to: g('assigned_to'), value: Number(g('value').replace(/[^\d.]/g, '')) || 0, tags: ['imported'] });
       added++;
     }
     $('#import-msg').textContent = `Imported ${added} lead${added === 1 ? '' : 's'}${dup ? `, skipped ${dup} already in your CRM` : ''}.`;

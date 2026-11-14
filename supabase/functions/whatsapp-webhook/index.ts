@@ -3,7 +3,7 @@
 // Secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_VERIFY_TOKEN, OWNER_ID
 // Optional: GEMINI_API_KEY (free tier) for natural, context-aware replies.
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { DEFAULT_AGENT, nextTurn, scoreAnswers } from '../_shared/monk-engine.js';
+import { DEFAULT_AGENT, nextTurn, scoreAnswers, leadFields, answersSummary } from '../_shared/monk-engine.js';
 
 const env = (k: string) => Deno.env.get(k) ?? '';
 const db = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'));
@@ -83,9 +83,11 @@ Deno.serve(async (req) => {
     if (turn.done) {
       const score = turn.score ?? scoreAnswers(turn.conv.answers, agent);
       patch.score = score;
-      const leadPatch: Record<string, unknown> = { score, interest: turn.conv.answers.interest ?? null, budget: turn.conv.answers.budget ?? null, timeline: turn.conv.answers.timeline ?? null };
+      const leadPatch: Record<string, unknown> = { score, ...leadFields(turn.conv.answers) };
+      const summary = answersSummary(turn.conv.answers, agent);
+      if (conv.lead_id && summary) await db.from('notes').insert({ owner: OWNER, lead_id: conv.lead_id, kind: 'whatsapp', body: 'Monk AI collected:\n' + summary });
       if (score === 'hot') {
-        const { data: q } = await db.from('stages').select('id').eq('owner', OWNER).ilike('name', '%qualif%').limit(1).maybeSingle();
+        const { data: q } = await db.from('stages').select('id').eq('owner', OWNER).or('name.ilike.%qualif%,name.ilike.%rfq%').limit(1).maybeSingle();
         if (q) leadPatch.stage_id = q.id;
         leadPatch.assigned_to = agent.rep_name || null;
         await db.from('tasks').insert({ owner: OWNER, lead_id: conv.lead_id, title: `Call ${name} (hot lead from Monk AI)`, due_at: new Date(Date.now() + 15 * 60e3).toISOString() });

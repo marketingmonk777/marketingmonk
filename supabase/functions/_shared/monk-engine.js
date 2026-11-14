@@ -27,7 +27,8 @@ export function scoreAnswers(answers, agent = DEFAULT_AGENT) {
   const hot = list(agent.hot_words).some((w) => text.includes(w));
   const cold = list(agent.cold_words).some((w) => text.includes(w));
   if (cold && !hot) return 'cold';
-  const hasBudget = answers?.budget && !/no|not sure|none|don'?t know/i.test(answers.budget);
+  const size = answers?.budget || answers?.quantity; // quantity stands in for budget in B2B presets
+  const hasBudget = size && !/^(no|not sure|none|don'?t know|na|n\/a)\b/i.test(String(size).trim());
   if (hot && hasBudget) return 'hot';
   if (hot || hasBudget) return 'warm';
   return 'cold';
@@ -68,4 +69,16 @@ export function nextTurn(conv, incoming, agent = DEFAULT_AGENT) {
   return { replies, conv: c, done: true, score };
 }
 
-if (typeof window !== 'undefined') window.MonkEngine = { DEFAULT_AGENT, nextTurn, scoreAnswers };
+// Maps qualifier answers onto the lead's columns, whatever the preset asked.
+export function leadFields(answers = {}) {
+  const a = answers || {};
+  const interest = [a.interest, a.grade, a.size].filter(Boolean).join(' · ');
+  return { interest: interest || null, budget: a.budget || a.quantity || null, timeline: a.timeline || null };
+}
+// One line per answer, for a note on the lead.
+export function answersSummary(answers = {}, agent = DEFAULT_AGENT) {
+  const label = Object.fromEntries((agent?.questions || []).map((q) => [q.key, q.label || q.key]));
+  return Object.entries(answers || {}).filter(([, v]) => v).map(([k, v]) => `${label[k] || k}: ${v}`).join('\n');
+}
+
+if (typeof window !== 'undefined') window.MonkEngine = { DEFAULT_AGENT, nextTurn, scoreAnswers, leadFields, answersSummary };

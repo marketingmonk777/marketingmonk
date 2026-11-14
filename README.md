@@ -65,3 +65,12 @@ Without WhatsApp connected, the **Follow-ups → Due now** queue lets you send e
 1. Run the updated `supabase/schema.sql` again (adds `integrations`, the website-form function and the new-lead webhook trigger). Enable `pg_net` for outgoing webhooks.
 2. Website form: Integrations → copy the embed code onto any site. It uses your booking-page handle, so save Bookings first.
 3. Incoming leads: `supabase functions deploy lead-intake --no-verify-jwt`, press Save under Zapier/Make once to create your private key, then point a Zap or Make scenario (for example "New Facebook Lead Ads lead") at the incoming URL shown.
+
+## Industry presets (Part 6)
+
+Settings → Industry preset sets up the CRM for a trade in one click: pipeline stages, Monk AI qualifier questions, follow-up sequences, booking page wording and lead-field labels. Leads are kept.
+
+- **PTFE manufacturer**: stages New enquiry → Qualified RFQ → Sample sent → Quotation sent → Negotiation → Won – PO received → Lost. Monk AI asks for product, grade, size, quantity, delivery, and company + GST, then saves every answer as a note on the lead. Sequences: Quotation follow-up, Sample feedback, Repeat order reminder. CSV import understands IndiaMART exports (SENDER_NAME, SENDER_MOBILE, QUERY_PRODUCT_NAME…).
+- **Real estate agent**: coming next.
+
+After pulling this update, redeploy `whatsapp-webhook` so live WhatsApp chats use the same mapping.
