@@ -29,6 +29,14 @@
       cold_words: 'just checking, rate only, price only, student, college project, not now, later, maybe, next year, just looking',
       handoff_hot: 'Thank you! {rep} from our sales team will call you shortly with pricing. 📞',
       handoff_other: 'Thank you! Our team is preparing your quotation and will share it here soon.',
+      kb: [
+        'price, rate, cost, kitna, bhav, कितना, रेट, ಬೆಲೆ, ભાવ | Rates depend on grade, size and quantity. Answer a few quick questions and we will send an exact quotation, usually the same day.',
+        'delivery, dispatch, how soon, kab tak, कब तक, ಡೆಲಿವರಿ, ડિલિવરી | Standard sizes ship in 2–4 working days across India. Custom machined parts depend on the drawing.',
+        'certificate, test report, tc, mtc, quality | Yes, we share a material test certificate with every order on request.',
+        'sample, trial | Yes, we can send a sample for approval before the bulk order.',
+        'minimum, moq, small quantity | We accept small and trial orders too. Tell us your quantity and we will quote.',
+        'gst, invoice, bill | All orders come with a proper GST invoice.',
+      ].join('\n'),
     },
     sequences: [
       { name: 'Quotation follow-up', stop_on_reply: true, steps: [

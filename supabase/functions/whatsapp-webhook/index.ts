@@ -3,7 +3,7 @@
 // Secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_VERIFY_TOKEN, OWNER_ID
 // Optional: GEMINI_API_KEY (free tier) for natural, context-aware replies.
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { DEFAULT_AGENT, nextTurn, scoreAnswers, leadFields, answersSummary } from '../_shared/monk-engine.js';
+import { DEFAULT_AGENT, nextTurn, scoreAnswers, leadFields, answersSummary, LANGS } from '../_shared/monk-engine.js';
 
 const env = (k: string) => Deno.env.get(k) ?? '';
 const db = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'));
@@ -21,11 +21,14 @@ export async function sendWhatsApp(to: string, body: string) {
 
 // Optional LLM polish: keeps the rule engine's plan but lets Gemini answer
 // side questions naturally ("what's the price?") before asking the next question.
-async function polish(agent: any, history: any[], planned: string[]): Promise<string[]> {
+async function polish(agent: any, history: any[], planned: string[], lang = 'en'): Promise<string[]> {
   const key = env('GEMINI_API_KEY');
   if (!key) return planned;
   const prompt = `You are Monk AI, a warm, concise WhatsApp sales assistant for ${agent.business_name}. About: ${agent.about}
 Conversation so far:\n${history.map((m) => `${m.from === 'lead' ? 'Customer' : 'You'}: ${m.body}`).join('\n')}
+Reply in ${lang === 'hi-Latn' ? 'Hinglish (Hindi in Roman letters)' : lang === 'en' ? 'English' : (LANGS as any)[lang] || 'the customer\'s language'}. Answer side questions using the knowledge base below or About; never invent prices.
+Knowledge base:
+${agent.kb || '-'}
 Your next message must convey the following, in order, as ONE short WhatsApp message (max 60 words, no markdown). If the customer asked something you can answer from "About", answer it briefly first; never invent prices or facts.\n${planned.join('\n')}`;
   try {
     const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
@@ -77,7 +80,7 @@ Deno.serve(async (req) => {
 
   if (conv.status === 'ai') {
     const turn = nextTurn({ step: conv.step, answers: conv.answers, status: conv.status }, text, agent);
-    const replies = await polish(agent, messages, turn.replies);
+    const replies = await polish(agent, messages, turn.replies, turn.lang);
     for (const r of replies) { await sendWhatsApp(phone, r); messages.push({ from: 'ai', body: r, at: new Date().toISOString() }); }
     patch = { ...patch, messages, step: turn.conv.step, answers: turn.conv.answers, status: turn.conv.status };
     if (turn.done) {
@@ -85,7 +88,7 @@ Deno.serve(async (req) => {
       patch.score = score;
       const leadPatch: Record<string, unknown> = { score, ...leadFields(turn.conv.answers) };
       const summary = answersSummary(turn.conv.answers, agent);
-      if (conv.lead_id && summary) await db.from('notes').insert({ owner: OWNER, lead_id: conv.lead_id, kind: 'whatsapp', body: 'Monk AI collected:\n' + summary });
+      if (conv.lead_id && summary) await db.from('notes').insert({ owner: OWNER, lead_id: conv.lead_id, kind: 'whatsapp', body: 'Monk AI collected:\n' + summary + (turn.reasons?.length ? `\n\nWhy ${score}: ${turn.reasons.join('; ')}` : '') + (turn.lang && turn.lang !== 'en' ? `\nLanguage: ${(LANGS as any)[turn.lang]}` : '') });
       if (score === 'hot') {
         const { data: q } = await db.from('stages').select('id').eq('owner', OWNER).or('name.ilike.%qualif%,name.ilike.%rfq%').limit(1).maybeSingle();
         if (q) leadPatch.stage_id = q.id;

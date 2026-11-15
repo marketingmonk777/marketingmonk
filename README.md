@@ -89,3 +89,11 @@ After pulling this update, redeploy `whatsapp-webhook` so live WhatsApp chats us
 - **Shared inbox**: filter by All / Mine / Unassigned, and assign any chat from its header. Replying or taking over claims an unassigned chat, and each reply shows who sent it.
 - **Demo**: use "View as" at the bottom left to preview what a rep or manager sees.
 - **Cloud setup**: run the Part 8 section of `supabase/schema.sql` (creates `team_members`, team-aware policies, and the `conversations.assigned_to` column).
+
+## Monk AI+ (Part 9)
+
+- **Speaks the customer's language**: Monk AI replies in Hindi, Hinglish, Kannada or Gujarati, matching what the customer writes (Monk AI → Reply language: Auto). The default and PTFE questions come translated. Your own custom text stays as you wrote it, unless Gemini is on, in which case Gemini translates it.
+- **Knowledge base**: Monk AI → "Answers Monk AI knows", one line each in the form `keywords | answer`. When a customer asks about price, delivery, certificates, samples and so on, Monk AI answers first and then repeats its own question. The PTFE preset includes 6 answers.
+- **Why this score**: each qualified lead gets the reasons for its score (urgency words, quantity or budget, hesitation) plus its language, in the lead drawer and the activity note. Hot and cold words in Hindi, Kannada and Gujarati are always recognised.
+- **Next best action**: the lead drawer suggests one step (call now, chase the quote, finish the draft, send a quotation, nurture, check in) with a one-tap button.
+- **Cloud**: redeploy `whatsapp-webhook` so live WhatsApp gets this. No SQL needed.

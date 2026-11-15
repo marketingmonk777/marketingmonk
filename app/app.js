@@ -342,9 +342,39 @@
     $('#lead-extra').classList.toggle('hidden', !l);
     $('#mark-contacted').classList.toggle('hidden', !l || isContacted(l)); $('#lead-quote').classList.toggle('hidden', !l);
     $('#lead-qr').innerHTML = quickReplies().map((q, i) => `<option value="${i}">${esc(q.title)}</option>`).join('');
+    renderInsight(l);
     if (l) { await renderNotes(); renderLeadSeq(); }
     $('#drawer').classList.remove('hidden'); $('#scrim').classList.remove('hidden');
     f.elements.name.focus();
+  }
+  /* ---------- Part 9: why this score + next best action ---------- */
+  function nextAction(l) {
+    const st = stageName(l.stage_id), ago = (d) => Math.floor((Date.now() - new Date(d)) / 864e5);
+    const q = state.quotes.filter((x) => x.lead_id === l.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    const bk = state.bookings.find((b) => b.lead_id === l.id && b.status === 'booked' && new Date(b.starts_at) > Date.now());
+    const seq = state.enrolls.some((e) => e.lead_id === l.id && e.status === 'active');
+    if (/won/i.test(st)) return { i: '🏆', t: 'Won. Ask for a review, a referral, or the next order date.' };
+    if (/lost/i.test(st)) return { i: '🌱', t: 'Lost for now. Ask why in one line, and check back in 60 days.' };
+    if (l.score === 'hot' && !isContacted(l)) return { i: '📞', t: `Call now. This hot lead has waited ${dur(Date.now() - new Date(l.created_at))}.`, a: 'call' };
+    if (bk) return { i: '📅', t: `Prepare for the call on ${fmtDT(bk.starts_at)}: check their answers, keep a price ready.` };
+    if (q && q.status === 'sent' && ago(q.updated_at || q.created_at) >= 2) return { i: '⏳', t: `Chase quote ${q.number || ''}. Sent ${ago(q.updated_at || q.created_at)} days ago with no answer. Offer a sample or a small change.`, a: 'qr' };
+    if (q && q.status === 'draft') return { i: '📝', t: `Finish quote ${q.number || ''} and send it on WhatsApp.`, a: 'quote' };
+    if (!q && l.score !== 'cold' && isContacted(l)) return { i: '📄', t: 'Send a quotation while the interest is fresh.', a: 'quote' };
+    if (l.score === 'cold' && !seq) return { i: '🔁', t: 'Not ready yet. Put them on a nurture sequence instead of calling.' };
+    if (ago(l.updated_at || l.created_at) >= 3) return { i: '👋', t: `Quiet for ${ago(l.updated_at || l.created_at)} days. Send a quick check-in.`, a: 'qr' };
+    if (!isContacted(l)) return { i: '💬', t: 'Make first contact: call or send a WhatsApp.', a: 'qr' };
+    return { i: '✅', t: 'On track. Keep the conversation going.' };
+  }
+  function renderInsight(l) {
+    const box = $('#lead-insight'); if (!l) { box.classList.add('hidden'); return; }
+    const conv = state.convs.find((c) => c.lead_id === l.id);
+    const ex = conv && Object.keys(conv.answers || {}).some((k) => !k.startsWith('_')) ? window.MonkEngine.explainScore(conv.answers, state.agent || undefined) : null;
+    const lang = conv?.answers?._lang; const n = nextAction(l);
+    const digits = (l.phone || '').replace(/\D/g, '');
+    const btn = n.a === 'call' && digits ? `<a class="btn btn-sm" href="tel:+${digits}">Call</a>` : n.a === 'quote' ? '<button type="button" class="btn btn-sm" data-nba="quote">Open quote</button>' : n.a === 'qr' ? '<button type="button" class="btn btn-ghost btn-sm" data-nba="qr">Pick a quick reply</button>' : '';
+    box.innerHTML = `<div class="nba"><span>${n.i}</span><div><b>Next best action</b><p>${esc(n.t)}</p></div>${btn}</div>
+      ${ex ? `<div class="why"><b>Why ${SCORE[l.score] || l.score}</b>${ex.reasons.map((r) => `<span>${esc(r)}</span>`).join('')}${lang && lang !== 'en' ? `<span>🗣️ Speaks ${esc(window.MonkEngine.LANGS[lang] || lang)}</span>` : ''}</div>` : ''}`;
+    box.classList.remove('hidden');
   }
   function closeLead() { $('#drawer').classList.add('hidden'); $('#scrim').classList.add('hidden'); state.editing = null; }
   async function renderNotes() {
@@ -449,7 +479,7 @@
     const who = { lead: '', ai: 'Monk AI', rep: 'Team' };
     $('#thread').innerHTML = `<div class="thread-head"><div><b>${esc(c.name || c.phone)}</b><span class="small muted">${esc(c.phone || '')} · ${STATUS[c.status] || ''}</span></div>
       <div class="drawer-actions"><select id="t-assign" class="qr-pick" title="Assign chat"><option value="">Unassigned</option>${[...new Set([state.me.name, ...allReps(), c.assigned_to].filter(Boolean))].map((n) => `<option ${n === c.assigned_to ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>${c.lead_id ? '<button class="btn btn-ghost btn-sm" id="t-lead">Open lead</button>' : ''}<button class="btn btn-ghost btn-sm" id="t-toggle">${c.status === 'ai' ? 'Take over' : 'Let Monk AI reply'}</button></div></div>
-      ${Object.keys(c.answers || {}).length ? `<div class="answers">${Object.entries(c.answers).map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('')}</div>` : ''}
+      ${Object.keys(c.answers || {}).length ? `<div class="answers">${Object.entries(c.answers).filter(([k]) => !k.startsWith('_')).map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('')}</div>` : ''}
       <div class="bubbles" id="bubbles">${(c.messages || []).map((m) => `<div class="bub ${m.from}">${who[m.from] ? `<i>${esc(m.from === 'rep' && m.by ? m.by : who[m.from])}</i>` : ''}${esc(m.body)}<span>${fmtDT(m.at)}</span></div>`).join('')}</div>
        <form id="reply-form" class="sim-form"><select id="reply-qr" class="qr-pick" title="Quick reply"><option value="">⚡</option>${quickReplies().map((q, i) => `<option value="${i}">${esc(q.title)}</option>`).join('')}</select><input id="reply-input" placeholder="Reply on WhatsApp…" autocomplete="off" required><button class="btn btn-sm">Send</button></form>`;
     const b = $('#bubbles'); b.scrollTop = b.scrollHeight;
@@ -459,7 +489,7 @@
   function qRow(q = { key: '', question: '' }) { return `<div class="q-row"><input class="q-key" placeholder="field (budget)" value="${esc(q.key)}"><input class="q-text" placeholder="Question to ask" value="${esc(q.question)}"><button type="button" class="x">×</button></div>`; }
   function renderAgent() {
     const a = state.agent || {}; const f = $('#agent-form');
-    ['business_name', 'rep_name', 'about', 'greeting', 'hot_words', 'cold_words', 'handoff_hot', 'handoff_other'].forEach((k) => { f.elements[k].value = a[k] || ''; });
+    ['business_name', 'rep_name', 'about', 'greeting', 'hot_words', 'cold_words', 'handoff_hot', 'handoff_other', 'kb'].forEach((k) => { f.elements[k].value = a[k] || ''; }); f.elements.language.value = a.language || 'auto';
     $('#q-list').innerHTML = (a.questions || []).map(qRow).join('');
     if (!sim.started) simReset();
   }
@@ -486,7 +516,7 @@
       try {
         const lead = await store.saveLead({ name, phone: '', email: '', source: 'WhatsApp', score: r.score, stage_id: stage?.id || null, ...window.MonkEngine.leadFields(ans), assigned_to: r.score === 'hot' ? (state.agent?.rep_name || '') : '', value: 0, tags: ['monk-ai'] });
         const summary = window.MonkEngine.answersSummary(ans, state.agent);
-        if (summary) await store.addNote({ lead_id: lead.id, kind: 'whatsapp', body: 'Monk AI collected:\n' + summary });
+        if (summary) await store.addNote({ lead_id: lead.id, kind: 'whatsapp', body: 'Monk AI collected:\n' + summary + (r.reasons?.length ? `\n\nWhy ${r.score}: ${r.reasons.join('; ')}` : '') + (r.lang && r.lang !== 'en' ? `\nLanguage: ${window.MonkEngine.LANGS[r.lang]}` : '') });
         await store.saveConversation({ lead_id: lead.id, name, phone: '', channel: 'simulator', status: sim.conv.status, score: r.score, step: sim.conv.step, answers: ans, unread: r.score === 'hot' ? 1 : 0, messages: sim.conv.messages });
         if (r.score === 'hot') await store.addTask({ lead_id: lead.id, title: `Call ${name} (hot lead from Monk AI)`, due_at: new Date(Date.now() + 15 * 6e4).toISOString() });
         $('#sim-note').innerHTML = `Lead created: <span class="score ${r.score}">${SCORE[r.score]}</span> in ${esc(stage?.name || 'pipeline')}. <a href="#" id="sim-restart">Test again</a>`;
@@ -532,7 +562,7 @@
     $('#q-list').addEventListener('click', (e) => { if (e.target.matches('.x')) e.target.closest('.q-row').remove(); });
     $('#agent-form').addEventListener('submit', async (e) => {
       e.preventDefault(); const f = e.target; const a = {};
-      ['business_name', 'rep_name', 'about', 'greeting', 'hot_words', 'cold_words', 'handoff_hot', 'handoff_other'].forEach((k) => { a[k] = f.elements[k].value.trim(); });
+      ['business_name', 'rep_name', 'about', 'greeting', 'hot_words', 'cold_words', 'handoff_hot', 'handoff_other', 'kb', 'language'].forEach((k) => { a[k] = f.elements[k].value.trim(); });
       const oldQ = Object.fromEntries((state.agent?.questions || []).map((q) => [q.key, q]));
       a.questions = $$('.q-row').map((r) => { const key = r.querySelector('.q-key').value.trim().toLowerCase().replace(/\s+/g, '_') || 'answer'; return { key, question: r.querySelector('.q-text').value.trim(), ...(oldQ[key]?.label ? { label: oldQ[key].label } : {}) }; }).filter((q) => q.question);
       if (state.agent?.industry) a.industry = state.agent.industry;
@@ -847,6 +877,7 @@
     $('#sla-bar').addEventListener('click', (e) => { const b = e.target.closest('[data-lead]'); if (b) openLead(b.dataset.lead); });
     $('#mark-contacted').addEventListener('click', async () => { await markContacted(state.editing); await store.addNote({ lead_id: state.editing.id, kind: 'call', body: 'Marked as contacted' }); toast('Marked as contacted'); $('#mark-contacted').classList.add('hidden'); renderNotes(); load(); });
     $('#lead-quote').addEventListener('click', () => { state.activeQuote = null; state.quoteLead = state.editing.id; state.quoteDirty = true; closeLead(); state.view = 'quotes'; location.hash = 'quotes'; render(); });
+    $('#lead-insight').addEventListener('click', (e) => { const a = e.target.closest('[data-nba]')?.dataset.nba; if (a === 'quote') $('#lead-quote').click(); if (a === 'qr') { const s = $('#lead-qr'); s.scrollIntoView({ block: 'center' }); s.focus(); } });
     $('#lead-qr-send').addEventListener('click', async () => {
       const l = state.editing; const q = quickReplies()[+$('#lead-qr').value]; const digits = (l?.phone || '').replace(/\D/g, ''); if (!q) return; if (!digits) return toast('This lead has no phone number');
       const msg = personalise(q.body, l); window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener');
