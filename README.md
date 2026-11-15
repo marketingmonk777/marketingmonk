@@ -81,3 +81,11 @@ After pulling this update, redeploy `whatsapp-webhook` so live WhatsApp chats us
 - **Hot-lead alerts**: a red bar (plus optional desktop notifications) when a hot lead has not been contacted within your time limit, which defaults to 15 minutes. A lead counts as contacted once you log a call or WhatsApp, move its stage, or send a quick reply.
 - **Round-robin**: list your reps in Settings, and new unassigned leads are shared out in turn.
 - **Quick replies**: saved messages with {name}/{business}/{booking_link}, used in the inbox and in the lead drawer (opens WhatsApp). The PTFE preset includes its own set.
+
+## Team (Part 8)
+
+- **Members & roles**: In Settings → Team members, add each person's name and email as a **Rep** (sees only leads and chats assigned to them, plus unassigned ones) or a **Manager** (sees everything). The owner manages the team. Only owners and managers can open Settings, Integrations and Monk AI setup.
+- **How members join**: they open the app and sign up with that same email. From then on they work inside the owner's workspace. Access is enforced in the database with row-level security, not only hidden in the app.
+- **Shared inbox**: filter by All / Mine / Unassigned, and assign any chat from its header. Replying or taking over claims an unassigned chat, and each reply shows who sent it.
+- **Demo**: use "View as" at the bottom left to preview what a rep or manager sees.
+- **Cloud setup**: run the Part 8 section of `supabase/schema.sql` (creates `team_members`, team-aware policies, and the `conversations.assigned_to` column).

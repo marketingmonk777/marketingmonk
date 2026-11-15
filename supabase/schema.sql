@@ -263,3 +263,62 @@ create table if not exists public.quotes (
 alter table public.quotes enable row level security;
 drop policy if exists "own rows" on public.quotes;
 create policy "own rows" on public.quotes for all using (owner = auth.uid()) with check (owner = auth.uid());
+
+-- =====================================================================
+-- Part 8: team – invite members, roles (owner / manager / rep), shared inbox
+-- Run this whole section once. Safe to re-run.
+-- Members sign up in the app with the email you added; they then work
+-- inside your workspace. Reps see only leads/chats assigned to them or
+-- unassigned. Managers see everything. Only owner/manager change setup.
+-- =====================================================================
+create table if not exists public.team_members (
+  id uuid primary key default gen_random_uuid(),
+  owner uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  email text not null,
+  name text not null,
+  role text not null default 'rep' check (role in ('manager','rep')),
+  created_at timestamptz not null default now(),
+  unique (owner, email)
+);
+alter table public.conversations add column if not exists assigned_to text;
+
+create or replace function public.mm_role(o uuid) returns text language sql stable security definer set search_path = public as $$
+  select case when o = auth.uid() then 'owner'
+    else (select role from team_members where owner = o and lower(email) = lower(auth.jwt()->>'email') limit 1) end
+$$;
+create or replace function public.mm_my_name(o uuid) returns text language sql stable security definer set search_path = public as $$
+  select name from team_members where owner = o and lower(email) = lower(auth.jwt()->>'email') limit 1
+$$;
+create or replace function public.mm_workspace() returns uuid language sql stable security definer set search_path = public as $$
+  select coalesce((select owner from team_members where lower(email) = lower(auth.jwt()->>'email') and owner <> auth.uid() order by created_at limit 1), auth.uid())
+$$;
+create or replace function public.mm_sees(o uuid, assignee text) returns boolean language sql stable set search_path = public as $$
+  select case public.mm_role(o)
+    when 'owner' then true when 'manager' then true
+    when 'rep' then coalesce(assignee, '') = '' or lower(assignee) = lower(coalesce(public.mm_my_name(o), '')) or lower(assignee) = lower(auth.jwt()->>'email')
+    else false end
+$$;
+
+alter table public.team_members enable row level security;
+drop policy if exists "owner manages team" on public.team_members;
+create policy "owner manages team" on public.team_members for all using (owner = auth.uid()) with check (owner = auth.uid());
+drop policy if exists "members see team" on public.team_members;
+create policy "members see team" on public.team_members for select using (public.mm_role(owner) is not null);
+
+do $$ declare t text; begin
+  foreach t in array array['stages','leads','notes','tasks','agent_config','conversations','sequences','enrollments','availability','bookings','integrations','quotes'] loop
+    if to_regclass('public.' || t) is null then continue; end if;
+    execute format('alter table public.%I alter column owner set default public.mm_workspace()', t);
+    execute format('drop policy if exists "own rows" on public.%I', t);
+    execute format('drop policy if exists "team rows" on public.%I', t);
+    execute format('drop policy if exists "team read" on public.%I', t);
+    if t in ('leads','conversations') then
+      execute format('create policy "team rows" on public.%I for all using (public.mm_sees(owner, assigned_to)) with check (public.mm_role(owner) is not null)', t);
+    elsif t in ('stages','agent_config','sequences','availability','integrations') then
+      execute format('create policy "team read" on public.%I for select using (public.mm_role(owner) is not null)', t);
+      execute format('create policy "team rows" on public.%I for all using (public.mm_role(owner) in (''owner'',''manager'')) with check (public.mm_role(owner) in (''owner'',''manager''))', t);
+    else
+      execute format('create policy "team rows" on public.%I for all using (public.mm_role(owner) is not null) with check (public.mm_role(owner) is not null)', t);
+    end if;
+  end loop;
+end $$;

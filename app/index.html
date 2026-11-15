@@ -7,7 +7,7 @@
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css?v=7">
+<link rel="stylesheet" href="app.css?v=8">
 </head>
 <body>
 <!-- Auth screen -->
@@ -50,6 +50,7 @@
     <div class="side-foot">
       <span id="mode-badge" class="badge"></span>
       <span id="user-email" class="small muted"></span>
+      <select id="view-as" class="view-as hidden" aria-label="Preview as team member"></select>
       <button class="link" id="signout">Sign out</button>
     </div>
   </aside>
@@ -68,7 +69,7 @@
     <section id="view-pipeline" class="view"><div id="board" class="board"></div></section>
     <section id="view-inbox" class="view hidden">
       <div class="inbox">
-        <div class="conv-list" id="conv-list"></div>
+        <div class="conv-col"><div id="inbox-filter" class="seg"><button data-f="all" class="active">All</button><button data-f="mine">Mine</button><button data-f="unassigned">Unassigned</button></div><div class="conv-list" id="conv-list"></div></div>
         <div class="thread" id="thread"><p class="empty">Pick a conversation. New WhatsApp chats land here, and Monk AI answers them first.</p></div>
       </div>
     </section>
@@ -227,6 +228,12 @@
         <p class="muted small">Set up the pipeline, Monk AI questions, follow-ups and booking page for your trade in one click. Your leads stay as they are, and you can edit everything afterwards.</p>
         <div id="preset-list" class="preset-list"></div>
       </div>
+      <div class="panel owner-only">
+        <h3>Team members</h3>
+        <p class="muted small" id="member-note"></p>
+        <ul id="member-list" class="stage-list"></ul>
+        <form id="member-form" class="row-form"><input name="name" placeholder="Name (Rahul)" required><input name="email" type="email" placeholder="rahul@company.com" required><select name="role"><option value="rep">Rep: own leads only</option><option value="manager">Manager: sees all</option></select><button class="btn btn-sm">Add</button></form>
+      </div>
       <div class="panel">
         <h3>Sales team &amp; hot-lead alerts</h3>
         <p class="muted small">New unassigned leads are shared out in turn. If a hot lead isn't contacted in time, you get an alert.</p>
@@ -315,7 +322,7 @@
 <div id="toast" class="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script type="module" src="../supabase/functions/_shared/monk-engine.js"></script>
-<script src="presets.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="presets.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

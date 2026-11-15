@@ -124,6 +124,11 @@
     async saveQuote(q) { const now = new Date().toISOString(); this.db.quotes ||= []; if (!q.id) { q = { ...q, id: uid(), created_at: now, updated_at: now }; this.db.quotes.push(q); } else { q = { ...q, updated_at: now }; this.db.quotes = this.db.quotes.map((x) => (x.id === q.id ? q : x)); } this.save(); return q; }
     async integrations() { return this.db.integ || {}; }
     async saveIntegrations(c) { this.db.integ = c; this.save(); }
+    async me() { const m = (this.db.members || []).find((x) => x.id === this.db.viewAs); return m ? { ...m } : { role: 'owner', name: 'You', email: '' }; }
+    async members() { return this.db.members || []; }
+    async saveMember(m) { this.db.members ||= []; const i = this.db.members.findIndex((x) => x.id === m.id); if (i >= 0) this.db.members[i] = { ...this.db.members[i], ...m }; else this.db.members.push({ ...m, id: uid(), created_at: new Date().toISOString() }); this.save(); }
+    async deleteMember(id) { this.db.members = (this.db.members || []).filter((x) => x.id !== id); if (this.db.viewAs === id) this.db.viewAs = null; this.save(); }
+    viewAs(id) { this.db.viewAs = id || null; this.save(); }
   }
 
   /* ---------- Supabase store ---------- */
@@ -136,7 +141,7 @@
     async signUp(email, password) { return this.chk(await this.sb.auth.signUp({ email, password, options: { emailRedirectTo: location.href.split('#')[0] } })); }
     async signOut() { await this.sb.auth.signOut(); }
     async stages() {
-      let rows = this.chk(await this.sb.from('stages').select('*').order('position'));
+      let rows = this.chk(await this.one(this.sb.from('stages').select('*')).order('position'));
       if (!rows.length) { rows = this.chk(await this.sb.from('stages').insert(DEFAULT_STAGES.map((name, position) => ({ name, position }))).select('*').order('position')); }
       return rows;
     }
@@ -156,7 +161,7 @@
     async addTask(t) { this.chk(await this.sb.from('tasks').insert(t)); }
     async updateTask(id, patch) { this.chk(await this.sb.from('tasks').update(patch).eq('id', id)); }
     async deleteTask(id) { this.chk(await this.sb.from('tasks').delete().eq('id', id)); }
-    async agentConfig() { const r = this.chk(await this.sb.from('agent_config').select('config').maybeSingle()); return r?.config || { ...window.MonkEngine.DEFAULT_AGENT }; }
+    async agentConfig() { const r = this.chk(await this.one(this.sb.from('agent_config').select('config')).maybeSingle()); return r?.config || { ...window.MonkEngine.DEFAULT_AGENT }; }
     async saveAgentConfig(config) { this.chk(await this.sb.from('agent_config').upsert({ config })); }
     async conversations() { return this.chk(await this.sb.from('conversations').select('*').order('updated_at', { ascending: false })); }
     async saveConversation(c) {
@@ -170,14 +175,26 @@
     async enrollments() { return this.chk(await this.sb.from('enrollments').select('*')); }
     async enroll(e) { return this.chk(await this.sb.from('enrollments').insert(e).select().single()); }
     async updateEnrollment(id, patch) { this.chk(await this.sb.from('enrollments').update(patch).eq('id', id)); }
-    async availability() { const r = this.chk(await this.sb.from('availability').select('*').maybeSingle()); return r ? { ...r.config, slug: r.slug } : { ...DEFAULT_AVAIL, slug: 'mm-' + Math.random().toString(36).slice(2, 8) }; }
+    async availability() { const r = this.chk(await this.one(this.sb.from('availability').select('*')).maybeSingle()); return r ? { ...r.config, slug: r.slug } : { ...DEFAULT_AVAIL, slug: 'mm-' + Math.random().toString(36).slice(2, 8) }; }
     async saveAvailability(a) { const { slug, ...config } = a; this.chk(await this.sb.from('availability').upsert({ slug, config })); }
     async bookings() { return this.chk(await this.sb.from('bookings').select('*').order('starts_at')); }
     async updateBooking(id, patch) { this.chk(await this.sb.from('bookings').update(patch).eq('id', id)); }
     async quotes() { return this.chk(await this.sb.from('quotes').select('*').order('created_at', { ascending: false })); }
     async saveQuote(q) { const { id, owner, created_at, ...row } = q; row.updated_at = new Date().toISOString(); return id ? this.chk(await this.sb.from('quotes').update(row).eq('id', id).select().single()) : this.chk(await this.sb.from('quotes').insert(row).select().single()); }
-    async integrations() { const r = this.chk(await this.sb.from('integrations').select('config').maybeSingle()); return r?.config || {}; }
+    async integrations() { const r = this.chk(await this.one(this.sb.from('integrations').select('config')).maybeSingle()); return r?.config || {}; }
     async saveIntegrations(config) { this.chk(await this.sb.from('integrations').upsert({ config })); }
+    async me() {
+      const { data } = await this.sb.auth.getUser(); const u = data?.user; if (!u) return { role: 'owner', name: 'You', email: '' };
+      this.ws = u.id;
+      const r = await this.sb.from('team_members').select('*').ilike('email', u.email).neq('owner', u.id).order('created_at').limit(1);
+      const m = !r.error && r.data?.[0];
+      if (m) { this.ws = m.owner; return { role: m.role, name: m.name, email: u.email }; }
+      return { role: 'owner', name: u.email.split('@')[0], email: u.email };
+    }
+    async members() { const r = await this.sb.from('team_members').select('*').eq('owner', this.ws).order('created_at'); return r.error ? [] : r.data; }
+    async saveMember(m) { const { id, owner, created_at, ...row } = m; row.email = row.email.trim().toLowerCase(); this.chk(id ? await this.sb.from('team_members').update(row).eq('id', id) : await this.sb.from('team_members').insert(row)); }
+    async deleteMember(id) { this.chk(await this.sb.from('team_members').delete().eq('id', id)); }
+    one(q) { return this.ws ? q.eq('owner', this.ws) : q; }
     async sendWhatsApp(conversation_id, body) { const { data, error } = await this.sb.functions.invoke('whatsapp-send', { body: { conversation_id, body } }); if (error) throw error; return data; }
   }
 
@@ -191,12 +208,16 @@
     else { try { cloud = new SupaStore(cfg.url, cfg.key); } catch (e) { bootIssue = 'Couldn\'t connect to Supabase: ' + e.message; } }
   }
   let store = null;
-  const state = { quotes: [], stages: [], leads: [], tasks: [], convs: [], agent: null, seqs: [], enrolls: [], avail: null, bookings: [], activeSeq: null, activeConv: null, view: 'pipeline', editing: null };
+  const state = { quotes: [], stages: [], leads: [], tasks: [], convs: [], agent: null, seqs: [], enrolls: [], avail: null, bookings: [], activeSeq: null, activeConv: null, view: 'pipeline', editing: null, me: { role: 'owner', name: 'You' }, members: [], inboxFilter: 'all' };
 
   async function load() {
+    if (store.mode === 'cloud' && !store.ws) { try { await store.me(); } catch {} }
     [state.stages, state.leads, state.tasks, state.convs, state.agent, state.seqs, state.enrolls, state.avail, state.bookings, state.integ] = await Promise.all([store.stages(), store.leads(), store.tasks(), store.conversations(), store.agentConfig(), store.sequences(), store.enrollments(), store.availability(), store.bookings(), store.integrations()]);
     try { state.quotes = await store.quotes(); } catch { state.quotes = []; }
-    await autoAssign();
+    try { state.me = await store.me(); state.members = await store.members(); } catch { state.me = { role: 'owner', name: 'You' }; state.members = []; }
+    applyRole();
+    if (state.me.role === 'rep') { const mine = (a) => !a || [state.me.name, state.me.email].filter(Boolean).some((x) => x.toLowerCase() === String(a).toLowerCase()); state.leads = state.leads.filter((l) => mine(l.assigned_to)); state.convs = state.convs.filter((c) => mine(c.assigned_to)); }
+    else await autoAssign();
     render(); checkSLA();
   }
 
@@ -264,6 +285,8 @@
     $('#reset-demo').closest('.panel').classList.toggle('hidden', store.mode !== 'demo');
     const ig = state.integ || {}, tf = $('#team-form');
     tf.elements.reps.value = (ig.reps || []).join(', '); tf.elements.round_robin.checked = !!ig.round_robin; tf.elements.sla.value = ig.sla_minutes || 15;
+    $('#member-list').innerHTML = state.members.length ? state.members.map((m) => `<li data-id="${m.id}"><span><b>${esc(m.name)}</b> <span class="small muted">${esc(m.email)}</span></span><span class="role-pill ${m.role}">${m.role === 'manager' ? 'Manager' : 'Rep'}</span><button class="x del" title="Remove">×</button></li>`).join('') : '<li class="muted small">No members yet. Add your reps so they can sign in with their own email.</li>';
+    $('#member-note').textContent = store.mode === 'demo' ? 'Demo: members are saved in this browser. Use "View as" at the bottom left to preview what each person sees.' : 'Each member signs up in this app with the same email. They then work inside your workspace. Needs the Part 8 SQL.';
     $('#notif-btn').classList.toggle('hidden', !('Notification' in window) || Notification.permission === 'granted');
     $('#qr-list').innerHTML = quickReplies().map((q, i) => `<li data-i="${i}"><span><b>${esc(q.title)}</b> <span class="small muted">${esc(q.body)}</span></span><button class="x del" title="Delete">×</button></li>`).join('');
     const cur = state.agent?.industry;
@@ -407,13 +430,15 @@
   const timeAgo = (d) => { const m = Math.round((Date.now() - new Date(d)) / 6e4); return m < 1 ? 'now' : m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; };
   function renderInbox() {
     const q = $('#search').value.trim().toLowerCase();
-    const cs = state.convs.filter((c) => !q || (c.name + ' ' + c.phone).toLowerCase().includes(q));
+    const f = state.inboxFilter, me = state.me.name;
+    const cs = state.convs.filter((c) => (!q || (c.name + ' ' + c.phone).toLowerCase().includes(q)) && (f === 'all' || (f === 'mine' ? (c.assigned_to || '') === me : !c.assigned_to)));
+    $$('#inbox-filter button').forEach((b) => b.classList.toggle('active', b.dataset.f === f));
     $('#conv-list').innerHTML = cs.length ? cs.map((c) => {
       const last = (c.messages || []).at(-1);
       return `<button class="conv ${c.id === state.activeConv ? 'active' : ''} ${c.unread ? 'unread' : ''}" data-id="${c.id}">
         <div class="conv-top"><b>${esc(c.name || c.phone)}</b><span class="small muted">${last ? timeAgo(last.at) : ''}</span></div>
         <p class="small muted">${esc(last ? (last.from === 'lead' ? '' : last.from === 'ai' ? 'AI: ' : 'You: ') + last.body : '')}</p>
-        <div class="conv-tags"><span class="st ${c.status}">${STATUS[c.status] || ''}</span>${c.score ? `<span class="score ${c.score}">${SCORE[c.score]}</span>` : ''}${c.channel === 'simulator' ? '<span class="st">Test</span>' : ''}</div>
+        <div class="conv-tags"><span class="st ${c.status}">${STATUS[c.status] || ''}</span>${c.score ? `<span class="score ${c.score}">${SCORE[c.score]}</span>` : ''}${c.channel === 'simulator' ? '<span class="st">Test</span>' : ''}<span class="st who">${c.assigned_to ? '👤 ' + esc(c.assigned_to) : 'Unassigned'}</span></div>
       </button>`;
     }).join('') : '<p class="empty">No conversations yet. Try the Monk AI test chat.</p>';
     renderThread();
@@ -421,11 +446,11 @@
   function renderThread() {
     const c = state.convs.find((x) => x.id === state.activeConv);
     if (!c) { $('#thread').innerHTML = '<p class="empty">Pick a conversation. New WhatsApp chats land here, and Monk AI answers them first.</p>'; return; }
-    const who = { lead: '', ai: 'Monk AI', rep: 'You' };
+    const who = { lead: '', ai: 'Monk AI', rep: 'Team' };
     $('#thread').innerHTML = `<div class="thread-head"><div><b>${esc(c.name || c.phone)}</b><span class="small muted">${esc(c.phone || '')} · ${STATUS[c.status] || ''}</span></div>
-      <div class="drawer-actions">${c.lead_id ? '<button class="btn btn-ghost btn-sm" id="t-lead">Open lead</button>' : ''}<button class="btn btn-ghost btn-sm" id="t-toggle">${c.status === 'ai' ? 'Take over' : 'Let Monk AI reply'}</button></div></div>
+      <div class="drawer-actions"><select id="t-assign" class="qr-pick" title="Assign chat"><option value="">Unassigned</option>${[...new Set([state.me.name, ...allReps(), c.assigned_to].filter(Boolean))].map((n) => `<option ${n === c.assigned_to ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>${c.lead_id ? '<button class="btn btn-ghost btn-sm" id="t-lead">Open lead</button>' : ''}<button class="btn btn-ghost btn-sm" id="t-toggle">${c.status === 'ai' ? 'Take over' : 'Let Monk AI reply'}</button></div></div>
       ${Object.keys(c.answers || {}).length ? `<div class="answers">${Object.entries(c.answers).map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('')}</div>` : ''}
-      <div class="bubbles" id="bubbles">${(c.messages || []).map((m) => `<div class="bub ${m.from}">${who[m.from] ? `<i>${who[m.from]}</i>` : ''}${esc(m.body)}<span>${fmtDT(m.at)}</span></div>`).join('')}</div>
+      <div class="bubbles" id="bubbles">${(c.messages || []).map((m) => `<div class="bub ${m.from}">${who[m.from] ? `<i>${esc(m.from === 'rep' && m.by ? m.by : who[m.from])}</i>` : ''}${esc(m.body)}<span>${fmtDT(m.at)}</span></div>`).join('')}</div>
        <form id="reply-form" class="sim-form"><select id="reply-qr" class="qr-pick" title="Quick reply"><option value="">⚡</option>${quickReplies().map((q, i) => `<option value="${i}">${esc(q.title)}</option>`).join('')}</select><input id="reply-input" placeholder="Reply on WhatsApp…" autocomplete="off" required><button class="btn btn-sm">Send</button></form>`;
     const b = $('#bubbles'); b.scrollTop = b.scrollHeight;
   }
@@ -481,13 +506,21 @@
     $('#thread').addEventListener('click', async (e) => {
       const c = state.convs.find((x) => x.id === state.activeConv); if (!c) return;
       if (e.target.id === 't-lead') openLead(c.lead_id);
-      if (e.target.id === 't-toggle') { c.status = c.status === 'ai' ? 'human' : 'ai'; await store.saveConversation({ ...c }); toast(c.status === 'ai' ? 'Monk AI will reply' : 'You have taken over'); load(); }
+      if (e.target.id === 't-toggle') { c.status = c.status === 'ai' ? 'human' : 'ai'; if (c.status === 'human' && !c.assigned_to) c.assigned_to = state.me.name; await store.saveConversation({ ...c }); toast(c.status === 'ai' ? 'Monk AI will reply' : 'You have taken over'); load(); }
     });
+    $('#thread').addEventListener('change', async (e) => {
+      if (e.target.id !== 't-assign') return; const c = state.convs.find((x) => x.id === state.activeConv); if (!c) return;
+      c.assigned_to = e.target.value; await store.saveConversation({ ...c });
+      if (c.lead_id) { const l = state.leads.find((x) => x.id === c.lead_id); if (l && !l.assigned_to && c.assigned_to) await store.saveLead({ id: l.id, assigned_to: c.assigned_to }); await store.addNote({ lead_id: c.lead_id, kind: 'note', body: `${state.me.name} assigned the chat to ${c.assigned_to || 'nobody'}` }); }
+      toast(c.assigned_to ? 'Assigned to ' + c.assigned_to : 'Unassigned'); load();
+    });
+    $('#inbox-filter').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; state.inboxFilter = b.dataset.f; renderInbox(); });
     $('#thread').addEventListener('submit', async (e) => {
       if (e.target.id !== 'reply-form') return; e.preventDefault();
       const c = state.convs.find((x) => x.id === state.activeConv); const body = $('#reply-input').value.trim(); if (!c || !body) return;
-      c.messages = [...(c.messages || []), { from: 'rep', body, at: new Date().toISOString() }];
+      c.messages = [...(c.messages || []), { from: 'rep', body, by: state.me.name, at: new Date().toISOString() }];
       if (c.status === 'ai') c.status = 'human';
+      if (!c.assigned_to) c.assigned_to = state.me.name;
       try {
         if (c.channel === 'whatsapp' && store.mode === 'cloud') await store.sendWhatsApp(c.id, body);
         else await store.saveConversation({ ...c });
@@ -741,7 +774,7 @@
   const contactedPatch = (l) => (isContacted(l) ? {} : { tags: [...(l.tags || []), 'contacted'] });
   async function markContacted(l) { if (!l || isContacted(l)) return; l.tags = [...(l.tags || []), 'contacted']; await store.saveLead({ id: l.id, tags: l.tags }); checkSLA(); }
   async function autoAssign() {
-    const ig = state.integ || {}; const reps = ig.reps || []; if (!ig.round_robin || !reps.length) return;
+    const ig = state.integ || {}; const reps = allReps(); if (!ig.round_robin || !reps.length) return;
     let i = ig.rr_next || 0; const todo = state.leads.filter((l) => !l.assigned_to && !/won|lost/i.test(stageName(l.stage_id))).sort((a, b) => a.created_at.localeCompare(b.created_at));
     if (!todo.length) return;
     for (const l of todo) { l.assigned_to = reps[i % reps.length]; i++; await store.saveLead({ id: l.id, assigned_to: l.assigned_to }); }
@@ -944,6 +977,26 @@
     }
   }
 
+  /* ---------- Part 8: team roles + shared inbox ---------- */
+  function allReps() { return [...new Set([...(state.integ?.reps || []), ...state.members.filter((m) => m.role === 'rep').map((m) => m.name)])]; }
+  function applyRole() {
+    const r = state.me.role; document.body.dataset.role = r;
+    $('#user-email').textContent = `${state.me.name}${state.me.email && state.me.email !== state.me.name ? '' : ''} · ${r === 'owner' ? 'Owner' : r === 'manager' ? 'Manager' : 'Rep'}`;
+    if (r === 'rep' && ['settings', 'integrations', 'agent'].includes(state.view)) { state.view = 'pipeline'; location.hash = 'pipeline'; }
+    const va = $('#view-as'); va.classList.toggle('hidden', store.mode !== 'demo');
+    if (store.mode === 'demo') { const cur = store.db.viewAs || ''; va.innerHTML = `<option value="">View as: Owner</option>${state.members.map((m) => `<option value="${m.id}" ${m.id === cur ? 'selected' : ''}>View as: ${esc(m.name)} (${m.role})</option>`).join('')}`; }
+  }
+  function bindP8() {
+    $('#member-form').addEventListener('submit', async (e) => {
+      e.preventDefault(); const f = e.target; const email = f.elements.email.value.trim(), name = f.elements.name.value.trim();
+      if (state.members.some((m) => m.email.toLowerCase() === email.toLowerCase())) return toast('Already in your team');
+      try { await store.saveMember({ name, email, role: f.elements.role.value }); f.reset(); toast(name + ' added'); load(); }
+      catch (err) { toast(/team_members|schema cache|does not exist/i.test(err.message) ? 'Run the Part 8 SQL in Supabase first.' : err.message); }
+    });
+    $('#member-list').addEventListener('click', async (e) => { if (!e.target.matches('.del')) return; const id = e.target.closest('li').dataset.id; const m = state.members.find((x) => x.id === id); if (!confirm(`Remove ${m?.name}? Their leads stay assigned to them.`)) return; await store.deleteMember(id); load(); });
+    $('#view-as').addEventListener('change', (e) => { store.viewAs(e.target.value); state.activeConv = null; load(); });
+  }
+
   function showAuth(msg) {
     $('#shell').classList.add('hidden'); $('#auth').classList.remove('hidden');
     if (msg) { $('#auth-msg').textContent = msg; $('#reset-conn').classList.remove('hidden'); }
@@ -952,7 +1005,7 @@
     const rc = $('#reset-conn');
     rc.addEventListener('click', (e) => { e.preventDefault(); localStorage.removeItem('mm_supabase'); location.reload(); });
     try {
-      bind(); bindAuth(); bindAI(); bindP4(); bindP5(); bindP7();
+      bind(); bindAuth(); bindAI(); bindP4(); bindP5(); bindP7(); bindP8();
       if (bootIssue) return showAuth(bootIssue);
       if (cloud) {
         let sess = null;
